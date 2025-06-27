@@ -154,7 +154,7 @@ const WorkspacePage = () => {
       });
 
       wsSync.on("song_change_sync", (message) => {
-        console.log("�� WebSocket song change:", message);
+        console.log("📡 WebSocket song change:", message);
         if (message.song) {
           setCurrentSong(message.song);
           setSyncedPosition(0);
