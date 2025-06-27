@@ -741,8 +741,8 @@ const WorkspacePage = () => {
                 lineHeight: "16px",
               }}
             >
-              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nghe cùng
-              nhé babe
+              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nh��c
+              cùng nhé babe
             </div>
           </div>
 
@@ -778,7 +778,7 @@ const WorkspacePage = () => {
                   width: "257px",
                 }}
               >
-                Lên nhạc đi bạn yêu!
+                L��n nhạc đi bạn yêu!
               </div>
               <div className="flex items-center gap-2.5 opacity-30">
                 <div

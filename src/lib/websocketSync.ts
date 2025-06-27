@@ -33,19 +33,10 @@ export class WebSocketMusicSync {
   constructor(url: string = "") {
     // Auto-detect WebSocket URL based on environment
     if (!url) {
-      // In development, use the Vite proxy endpoint
-      if (import.meta.env.DEV) {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.host; // includes port
-        this.url = `${protocol}//${host}/ws`;
-        console.log("🔗 WebSocket URL (dev proxy):", this.url);
-      } else {
-        // In production, you'll need to configure this for your deployment
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.host;
-        this.url = `${protocol}//${host}/ws`;
-        console.log("🔗 WebSocket URL (production):", this.url);
-      }
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host; // includes port
+      this.url = `${protocol}//${host}/ws`;
+      console.log("🔗 WebSocket URL:", this.url);
     } else {
       this.url = url;
     }
