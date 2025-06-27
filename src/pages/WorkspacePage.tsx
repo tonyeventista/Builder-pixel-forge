@@ -1138,7 +1138,7 @@ const WorkspacePage = () => {
           {/* Debug Panel - Temporary for server sync monitoring */}
           <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4 flex-shrink-0">
             <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
-              🔧 DEBUG - Server Sync Monitor
+              🔧 DEBUG - Server Sync Monitor (On-Demand Only)
             </div>
             <div className="space-y-1 text-xs font-montserrat">
               <div className="text-white">
