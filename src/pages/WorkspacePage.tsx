@@ -197,11 +197,13 @@ const WorkspacePage = () => {
       setDebugLastPollTime(now.toLocaleTimeString("vi-VN"));
       setDebugPollCount((prev) => prev + 1);
 
-      // Update queue from server
-      setServerQueue(roomState.queue || []);
+      // Update queue from server (already sorted by server by add time)
+      const serverQueue = roomState.queue || [];
+      setServerQueue(serverQueue);
 
-      // Sync local queue with server queue for UI display
-      setQueue(roomState.queue || []);
+      // Sync local queue with server queue for UI display - maintain server order
+      setQueue(serverQueue);
+      console.log(`📋 Synced queue from server: ${serverQueue.length} songs`);
 
       if (roomState.currentSong) {
         // Server has a song playing
@@ -773,7 +775,7 @@ const WorkspacePage = () => {
             <div className="text-white">
               <span className="text-gray-400">Server Song:</span>{" "}
               {debugServerState?.currentSong
-                ? `���� ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
+                ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
                 : "💤 No song"}
             </div>
             <div className="text-white">
