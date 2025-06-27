@@ -189,6 +189,9 @@ const WorkspacePage = () => {
       // Update queue from server
       setServerQueue(roomState.queue || []);
 
+      // Sync local queue with server queue for UI display
+      setQueue(roomState.queue || []);
+
       if (roomState.currentSong) {
         // Server has a song playing
         if (!currentSong || currentSong.id !== roomState.currentSong.id) {
