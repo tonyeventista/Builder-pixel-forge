@@ -669,14 +669,8 @@ const WorkspacePage = () => {
       setIsLocallyPaused(false);
       try {
         if (useWebSocketSync && wsConnected) {
-          const roomState = await wsSync.requestRoomState();
-          if (roomState.currentSong && roomState.isPlaying) {
-            setSyncedPosition(roomState.position || 0);
-            setStatus("playing");
-            console.log("▶️ Resumed and synced to server position");
-          } else {
-            setStatus("playing");
-          }
+          await pollServerStateOnce();
+          console.log("▶️ Resumed and synced to server position");
         } else {
           setStatus("playing");
         }
