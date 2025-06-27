@@ -420,6 +420,13 @@ export class WebSocketMusicSync {
       callbacks.forEach((callback) => callback({ type: eventType, ...data }));
     }
   }
+
+  /**
+   * Send raw message (public method for special cases)
+   */
+  sendMessage(message: any) {
+    this.send(message);
+  }
 }
 
 // Export singleton instance

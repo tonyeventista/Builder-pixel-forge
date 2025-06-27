@@ -49,59 +49,115 @@ const WorkspacePage = () => {
   const [serverPlaybackState, setServerPlaybackState] = useState<any>(null);
   const [isLocallyPaused, setIsLocallyPaused] = useState(false);
 
-  // Helper function to fetch YouTube video title
+  // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
     videoId: string,
   ): Promise<{ title: string; isValid: boolean }> => {
     // Validate videoId format before making API calls
     if (!videoId || videoId.length !== 11) {
-      return { title: `Video ${videoId}`, isValid: false };
+      return { title: `Invalid Video ID`, isValid: false };
     }
+
+    // Create fetch with timeout
+    const fetchWithTimeout = async (url: string, timeout = 8000) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; MusicApp/1.0)",
+          },
+        });
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    };
 
     try {
       // Use YouTube oEmbed API to get video title
-      const response = await fetch(
+      console.log(`🔍 Fetching title for video ${videoId}...`);
+      const response = await fetchWithTimeout(
         `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
       );
 
       if (response.ok) {
         const data = await response.json();
-        if (data.title) {
-          return { title: data.title, isValid: true };
+        if (data.title && data.title.trim()) {
+          console.log(`✅ Got title: ${data.title}`);
+          return { title: data.title.trim(), isValid: true };
         }
       } else if (response.status === 400 || response.status === 404) {
-        // Video not found or bad request
         console.warn(
-          `YouTube API returned ${response.status} for video ${videoId}`,
+          `❌ YouTube API returned ${response.status} for video ${videoId} - video not found`,
         );
-        return { title: `Video ${videoId}`, isValid: false };
+        return { title: `Video không tồn tại`, isValid: false };
+      } else if (response.status === 429) {
+        console.warn(`⚠️ YouTube API rate limited for video ${videoId}`);
+        // Continue to fallback
       }
     } catch (error) {
-      console.warn("YouTube oEmbed failed:", error);
+      if (error.name === "AbortError") {
+        console.warn(`⏱️ YouTube API timeout for video ${videoId}`);
+      } else {
+        console.warn("YouTube oEmbed failed:", error);
+      }
     }
 
-    // Try noembed.com as fallback
+    // Try noembed.com as fallback with shorter timeout
     try {
-      const response = await fetch(
+      console.log(`🔄 Trying fallback API for video ${videoId}...`);
+      const response = await fetchWithTimeout(
         `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`,
+        5000,
       );
 
       if (response.ok) {
         const data = await response.json();
-        if (data.title && !data.error) {
-          return { title: data.title, isValid: true };
+        if (data.title && data.title.trim() && !data.error) {
+          console.log(`✅ Fallback got title: ${data.title}`);
+          return { title: data.title.trim(), isValid: true };
         }
       } else if (response.status === 400 || response.status === 404) {
         console.warn(
-          `Fallback API returned ${response.status} for video ${videoId}`,
+          `❌ Fallback API returned ${response.status} for video ${videoId}`,
         );
+        return { title: `Video không tồn tại`, isValid: false };
       }
     } catch (fallbackError) {
-      console.warn("Fallback API failed:", fallbackError);
+      if (fallbackError.name === "AbortError") {
+        console.warn(`⏱️ Fallback API timeout for video ${videoId}`);
+      } else {
+        console.warn("Fallback API failed:", fallbackError);
+      }
     }
 
-    // If both APIs fail, assume invalid
-    return { title: `Video ${videoId}`, isValid: false };
+    // If both APIs fail, try to extract from URL params as last resort
+    try {
+      console.log(`🔄 Trying direct method for video ${videoId}...`);
+      // This is a simple check - if we can't get title, at least verify the video exists
+      const testResponse = await fetchWithTimeout(
+        `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        3000,
+      );
+
+      if (testResponse.ok) {
+        console.log(
+          `✅ Video ${videoId} appears to exist but title unavailable`,
+        );
+        return { title: `🎵 Video ${videoId}`, isValid: true };
+      }
+    } catch (testError) {
+      console.warn("Direct verification failed:", testError);
+    }
+
+    // All methods failed
+    console.warn(`❌ All methods failed for video ${videoId}`);
+    return { title: `Video không tồn tại hoặc bị lỗi`, isValid: false };
   };
 
   // Helper function to format video titles
@@ -401,18 +457,28 @@ const WorkspacePage = () => {
     }
 
     // Show validation status
-    setError("Đang kiểm tra...");
+    setError("Đang kiểm tra video...");
 
     try {
-      // Create item with temporary title first
+      // First validate the video before adding to queue/current
+      console.log(`🔍 Validating video ${videoId}...`);
+      const result = await fetchYouTubeTitle(videoId);
+
+      if (!result.isValid) {
+        setError(result.title || "Video không tồn tại hoặc bị lỗi");
+        return;
+      }
+
+      // Create item with real title
       const newItem: Song = {
         id: Date.now().toString(),
-        title: `🎵 Đang tải...`,
+        title: result.title,
         url: normalizedUrl,
         videoId,
       };
 
       if (!currentSong) {
+        console.log("🎵 Setting as current song and starting server playback");
         setStatus("loading");
         setCurrentSong(newItem);
 
@@ -435,43 +501,16 @@ const WorkspacePage = () => {
           setStatus("playing");
         }
       } else {
+        console.log("🎵 Adding to queue - will play after current song");
         setQueue([...queue, newItem]);
       }
 
       setInputUrl("");
       setError("");
-
-      // Validate URL by trying to fetch video information in background
-      const result = await fetchYouTubeTitle(videoId);
-
-      // Update with real title or show error if validation failed
-      if (result.isValid) {
-        const updatedItem = { ...newItem, title: result.title };
-
-        if (!currentSong || currentSong.id === newItem.id) {
-          setCurrentSong(updatedItem);
-        } else {
-          setQueue((prevQueue) =>
-            prevQueue.map((song) =>
-              song.id === newItem.id ? updatedItem : song,
-            ),
-          );
-        }
-      } else {
-        // Remove the invalid item and show error
-        if (!currentSong || currentSong.id === newItem.id) {
-          setCurrentSong(null);
-          setStatus("paused");
-        } else {
-          setQueue((prevQueue) =>
-            prevQueue.filter((song) => song.id !== newItem.id),
-          );
-        }
-        setError("Đường d��n không tồn tại hoặc bị lỗi.");
-      }
+      console.log(`✅ Successfully added: ${result.title}`);
     } catch (error) {
       // Validation failed
-      setError("Đường dẫn không tồn tại hoặc bị lỗi.");
+      setError("Có lỗi xảy ra khi kiểm tra video");
       console.warn("URL validation failed:", error);
     }
   };
@@ -549,17 +588,33 @@ const WorkspacePage = () => {
   }, [workspaceId, useWebSocketSync, wsConnected]);
 
   const handlePlayerEnd = useCallback(() => {
+    console.log("🎵 Song ended, queue length:", queue.length);
+
     setTimeout(() => {
       if (queue.length > 0) {
-        // Play next song if available
+        // Play next song from queue automatically on server
+        console.log("🎵 Playing next song from queue");
         playNext();
       } else {
-        // Clear current song when finished and no more songs
+        // No more songs - clear current song and set to idle state
+        console.log("🎵 No more songs in queue - setting to idle state");
         setCurrentSong(null);
         setStatus("paused");
+        setIsLocallyPaused(false);
+        setSyncedPosition(0);
+
+        // Clear server state as well
+        if (workspaceId && useWebSocketSync && wsConnected) {
+          // Notify server that playback has ended
+          wsSync.sendMessage({
+            type: "playback_ended",
+            workspaceId: workspaceId,
+            clientTime: Date.now(),
+          });
+        }
       }
     }, 2000);
-  }, [queue]);
+  }, [queue, workspaceId, useWebSocketSync, wsConnected]);
 
   const togglePlayPause = useCallback(async () => {
     if (!currentSong) return;
