@@ -4,8 +4,6 @@ interface SynchronizedYouTubePlayerProps {
   videoId: string | null;
   isPlaying: boolean;
   startPosition?: number; // Position to start/seek to
-  isLocallyPaused?: boolean; // New: indicates if user paused locally
-  serverPlaying?: boolean; // New: indicates if server is playing
   onReady?: () => void;
   onEnd?: () => void;
   onTimeUpdate?: (currentTime: number) => void;
@@ -17,8 +15,6 @@ export const SynchronizedYouTubePlayer = memo(
     videoId,
     isPlaying,
     startPosition = 0,
-    isLocallyPaused = false,
-    serverPlaying = false,
     onReady,
     onEnd,
     onTimeUpdate,
@@ -42,20 +38,11 @@ export const SynchronizedYouTubePlayer = memo(
       }
     }, [videoId, currentVideoId, onReady]);
 
-    // Handle play/pause and seeking with local pause consideration
+    // Handle play/pause and seeking
     useEffect(() => {
       if (isPlayerReady && iframeRef.current && currentVideoId) {
         try {
-          // Determine actual playback state: pause if locally paused OR if not playing
-          const shouldPlay = isPlaying && !isLocallyPaused;
-
-          console.log("Controlling player:", {
-            isPlaying,
-            isLocallyPaused,
-            serverPlaying,
-            shouldPlay,
-            startPosition,
-          });
+          console.log("Controlling player:", { isPlaying, startPosition });
 
           // Seek to start position if provided and greater than 3 seconds
           if (startPosition > 3) {
@@ -66,7 +53,7 @@ export const SynchronizedYouTubePlayer = memo(
             );
             // Small delay before play/pause command
             setTimeout(() => {
-              if (shouldPlay) {
+              if (isPlaying) {
                 iframeRef.current?.contentWindow?.postMessage(
                   '{"event":"command","func":"playVideo","args":""}',
                   "*",
@@ -80,7 +67,7 @@ export const SynchronizedYouTubePlayer = memo(
             }, 500);
           } else {
             // Control playback immediately if no seeking needed
-            if (shouldPlay) {
+            if (isPlaying) {
               iframeRef.current.contentWindow?.postMessage(
                 '{"event":"command","func":"playVideo","args":""}',
                 "*",
@@ -96,21 +83,11 @@ export const SynchronizedYouTubePlayer = memo(
           console.warn("YouTube player control error:", error);
         }
       }
-    }, [
-      isPlayerReady,
-      isPlaying,
-      isLocallyPaused,
-      serverPlaying,
-      startPosition,
-      currentVideoId,
-    ]);
+    }, [isPlayerReady, isPlaying, startPosition, currentVideoId]);
 
-    // Start time tracking when playing (but not when locally paused)
+    // Start time tracking when playing
     useEffect(() => {
-      const shouldTrackTime =
-        isPlaying && !isLocallyPaused && isPlayerReady && onTimeUpdate;
-
-      if (shouldTrackTime) {
+      if (isPlaying && isPlayerReady && onTimeUpdate) {
         timeUpdateInterval.current = setInterval(() => {
           if (iframeRef.current) {
             try {
@@ -136,7 +113,7 @@ export const SynchronizedYouTubePlayer = memo(
           clearInterval(timeUpdateInterval.current);
         }
       };
-    }, [isPlaying, isLocallyPaused, isPlayerReady, onTimeUpdate]);
+    }, [isPlaying, isPlayerReady, onTimeUpdate]);
 
     // Listen for messages from YouTube player
     useEffect(() => {
