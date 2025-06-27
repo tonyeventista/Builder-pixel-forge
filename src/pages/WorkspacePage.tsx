@@ -533,6 +533,10 @@ const WorkspacePage = () => {
       try {
         if (useWebSocketSync && wsConnected) {
           const setAsCurrent = !currentSong;
+          console.log(
+            `🎵 Adding song to server - setAsCurrent: ${setAsCurrent}`,
+          );
+
           const response = await wsSync.addSongToServer(newItem, setAsCurrent);
 
           if (response.success) {
@@ -543,8 +547,13 @@ const WorkspacePage = () => {
               // Server will notify about playback start
             } else {
               console.log("🎵 Song added to server queue");
-              // Will be updated via polling
             }
+
+            // Always poll server state after adding to get updated queue
+            console.log("🔄 Polling server state after adding song...");
+            setTimeout(() => {
+              pollServerStateOnce();
+            }, 500);
           }
         } else {
           // Fallback to local queue management
