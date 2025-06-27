@@ -17,6 +17,7 @@ import {
 import { realtimeService } from "@/lib/realtimeWorkspace";
 import { synchronizedPlayback } from "@/lib/synchronizedPlayback";
 import { wsSync } from "@/lib/websocketSync";
+import { currentVersion } from "@/lib/version";
 
 interface Song {
   id: string;
@@ -812,7 +813,7 @@ const WorkspacePage = () => {
             <button
               onClick={() => navigate("/")}
               className="text-white hover:text-gray-300 transition-colors p-1"
-              title="Quay v�� trang ch���n workspace"
+              title="Quay v�� trang chọn workspace"
             >
               <svg
                 width="20"
