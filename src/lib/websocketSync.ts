@@ -30,12 +30,9 @@ export class WebSocketMusicSync {
   private isConnecting = false;
   private serverTimeOffset = 0;
 
-  // Local playback state (separate from server state)
-  private localPlaybackState = {
-    isLocallyPaused: false,
-    localPauseTime: 0,
-    localPausePosition: 0,
-  };
+  // Polling state
+  private pollingInterval: NodeJS.Timeout | null = null;
+  private requestIdCounter = 0;
 
   constructor(url: string = "") {
     // Auto-detect WebSocket URL based on environment
@@ -120,6 +117,7 @@ export class WebSocketMusicSync {
    * Disconnect from WebSocket server
    */
   disconnect() {
+    this.stopPolling();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -254,14 +252,9 @@ export class WebSocketMusicSync {
   }
 
   /**
-   * Calculate current playback position based on server time and local state
+   * Calculate current playback position based on server time
    */
   calculateCurrentPosition(playbackState: PlaybackState): number {
-    // If locally paused, return the paused position
-    if (this.localPlaybackState.isLocallyPaused) {
-      return this.localPlaybackState.localPausePosition;
-    }
-
     // If server is not playing, return server position
     if (!playbackState.isPlaying || !playbackState.startTime) {
       return playbackState.position;
@@ -273,34 +266,111 @@ export class WebSocketMusicSync {
   }
 
   /**
-   * Pause locally (doesn't affect server or other clients)
+   * Request current room state from server
    */
-  pauseLocally(currentPosition: number) {
-    this.localPlaybackState.isLocallyPaused = true;
-    this.localPlaybackState.localPauseTime = this.getServerTime();
-    this.localPlaybackState.localPausePosition = currentPosition;
+  requestRoomState(): Promise<any> {
+    const requestId = ++this.requestIdCounter;
 
-    this.requestClientPause();
-    console.log(`⏸️ Paused locally at position ${currentPosition}s`);
+    return new Promise((resolve, reject) => {
+      // Set up one-time listener for response
+      const handleResponse = (message: SyncMessage) => {
+        if (
+          message.type === "room_state_response" &&
+          message.requestId === requestId
+        ) {
+          this.off("room_state_response", handleResponse);
+          resolve(message);
+        }
+      };
+
+      this.on("room_state_response", handleResponse);
+
+      // Send request
+      this.send({
+        type: "get_room_state",
+        requestId,
+        clientTime: Date.now(),
+      });
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        this.off("room_state_response", handleResponse);
+        reject(new Error("Room state request timeout"));
+      }, 5000);
+    });
   }
 
   /**
-   * Resume locally and sync to server time
+   * Add song to server
    */
-  resumeLocally() {
-    this.localPlaybackState.isLocallyPaused = false;
-    this.localPlaybackState.localPauseTime = 0;
-    this.localPlaybackState.localPausePosition = 0;
+  addSongToServer(song: any, setAsCurrent: boolean = false): Promise<any> {
+    return new Promise((resolve, reject) => {
+      // Set up one-time listener for response
+      const handleResponse = (message: SyncMessage) => {
+        if (message.type === "song_added_response") {
+          this.off("song_added_response", handleResponse);
+          resolve(message);
+        }
+      };
 
-    this.requestClientResume();
-    console.log(`▶️ Resuming locally - will sync to server time`);
+      this.on("song_added_response", handleResponse);
+
+      // Send request
+      this.send({
+        type: "add_song",
+        song,
+        setAsCurrent,
+        clientTime: Date.now(),
+      });
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        this.off("song_added_response", handleResponse);
+        reject(new Error("Add song request timeout"));
+      }, 5000);
+    });
   }
 
   /**
-   * Check if currently paused locally
+   * Start polling for room state every 10 seconds
    */
-  isLocallyPaused(): boolean {
-    return this.localPlaybackState.isLocallyPaused;
+  startPolling(callback: (roomState: any) => void) {
+    this.stopPolling(); // Clear any existing polling
+
+    const poll = async () => {
+      try {
+        const roomState = await this.requestRoomState();
+        callback(roomState);
+      } catch (error) {
+        console.warn("Polling failed:", error);
+      }
+    };
+
+    // Poll immediately
+    poll();
+
+    // Then poll every 10 seconds
+    this.pollingInterval = setInterval(poll, 10000);
+    console.log("🕐 Started polling server every 10 seconds");
+  }
+
+  /**
+   * Stop polling
+   */
+  stopPolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+      console.log("⏹️ Stopped polling");
+    }
+  }
+
+  /**
+   * Calculate position based on server timestamp
+   */
+  calculateServerPosition(startTime: number, serverTime: number): number {
+    if (!startTime) return 0;
+    return Math.max(0, (Date.now() + this.serverTimeOffset - startTime) / 1000);
   }
 
   private setupEventHandlers() {
