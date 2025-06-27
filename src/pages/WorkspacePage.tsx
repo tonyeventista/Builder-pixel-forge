@@ -661,9 +661,13 @@ const WorkspacePage = () => {
     // Local play/pause control (doesn't affect server)
     if (status === "playing") {
       setStatus("paused");
-      console.log("⏸️ Paused locally - server continues");
+      setIsLocallyPaused(true);
+      console.log(
+        "⏸️ Paused locally - polling continues but won't override pause state",
+      );
     } else {
       // Resume and sync to server time
+      setIsLocallyPaused(false);
       try {
         if (useWebSocketSync && wsConnected) {
           const roomState = await wsSync.requestRoomState();
