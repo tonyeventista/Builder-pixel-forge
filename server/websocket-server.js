@@ -101,6 +101,10 @@ class MusicSyncServer {
         this.handleClientResume(ws, message);
         break;
 
+      case "playback_ended":
+        this.handlePlaybackEnded(ws, message);
+        break;
+
       default:
         this.sendError(ws, `Unknown message type: ${message.type}`);
     }
@@ -353,6 +357,36 @@ class MusicSyncServer {
 
     // Send current server state for resume sync
     this.sendCurrentServerState(ws, room);
+  }
+
+  handlePlaybackEnded(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    console.log(
+      `🏁 Playback ended in room ${client.roomId} - clearing server state`,
+    );
+
+    // Clear server playback state
+    room.playbackState = {
+      ...room.playbackState,
+      isPlaying: false,
+      currentSong: null,
+      position: 0,
+      startTime: null,
+      lastUpdated: Date.now(),
+      triggeredBy: client.id,
+    };
+
+    // Broadcast to all clients that playback has ended
+    this.broadcastToRoom(client.roomId, {
+      type: "playback_ended_sync",
+      serverTime: Date.now(),
+      triggeredBy: client.id,
+    });
   }
 
   sendCurrentServerState(ws, room) {
