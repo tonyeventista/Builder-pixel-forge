@@ -45,7 +45,7 @@ const WorkspacePage = () => {
   const [syncedPosition, setSyncedPosition] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState(0);
   const [isHost, setIsHost] = useState(false); // True if this user controls playback
-  const [useWebSocketSync, setUseWebSocketSync] = useState(false); // Disable WebSocket in cloud - use Firebase sync instead
+  const [useWebSocketSync, setUseWebSocketSync] = useState(true); // Enable WebSocket for ultra-fast sync
   const [wsConnected, setWsConnected] = useState(false);
 
   // Helper function to fetch YouTube video title
@@ -154,7 +154,7 @@ const WorkspacePage = () => {
       });
 
       wsSync.on("song_change_sync", (message) => {
-        console.log("📡 WebSocket song change:", message);
+        console.log("�� WebSocket song change:", message);
         if (message.song) {
           setCurrentSong(message.song);
           setSyncedPosition(0);
