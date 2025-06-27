@@ -30,6 +30,13 @@ export class WebSocketMusicSync {
   private isConnecting = false;
   private serverTimeOffset = 0;
 
+  // Local playback state (separate from server state)
+  private localPlaybackState = {
+    isLocallyPaused: false,
+    localPauseTime: 0,
+    localPausePosition: 0,
+  };
+
   constructor(url: string = "") {
     // Auto-detect WebSocket URL based on environment
     if (!url) {
@@ -144,24 +151,43 @@ export class WebSocketMusicSync {
   }
 
   /**
-   * Sync play action across all clients
+   * Request local play (client-side only)
    */
-  syncPlay(position: number = 0, songId?: string) {
+  requestClientPlay() {
     this.send({
       type: "play",
-      position,
-      songId,
       clientTime: Date.now(),
     });
   }
 
   /**
-   * Sync pause action across all clients
+   * Request local pause (client-side only)
    */
-  syncPause(position: number = 0) {
+  requestClientPause() {
     this.send({
-      type: "pause",
+      type: "client_pause",
+      clientTime: Date.now(),
+    });
+  }
+
+  /**
+   * Request resume and sync to server time
+   */
+  requestClientResume() {
+    this.send({
+      type: "client_resume",
+      clientTime: Date.now(),
+    });
+  }
+
+  /**
+   * Server-controlled play (when adding songs)
+   */
+  serverPlay(position: number = 0, songId?: string) {
+    this.send({
+      type: "server_play",
       position,
+      songId,
       clientTime: Date.now(),
     });
   }
@@ -228,15 +254,53 @@ export class WebSocketMusicSync {
   }
 
   /**
-   * Calculate current playback position based on server time
+   * Calculate current playback position based on server time and local state
    */
   calculateCurrentPosition(playbackState: PlaybackState): number {
+    // If locally paused, return the paused position
+    if (this.localPlaybackState.isLocallyPaused) {
+      return this.localPlaybackState.localPausePosition;
+    }
+
+    // If server is not playing, return server position
     if (!playbackState.isPlaying || !playbackState.startTime) {
       return playbackState.position;
     }
 
+    // Calculate server position
     const elapsed = (this.getServerTime() - playbackState.startTime) / 1000;
     return Math.max(0, elapsed);
+  }
+
+  /**
+   * Pause locally (doesn't affect server or other clients)
+   */
+  pauseLocally(currentPosition: number) {
+    this.localPlaybackState.isLocallyPaused = true;
+    this.localPlaybackState.localPauseTime = this.getServerTime();
+    this.localPlaybackState.localPausePosition = currentPosition;
+
+    this.requestClientPause();
+    console.log(`⏸️ Paused locally at position ${currentPosition}s`);
+  }
+
+  /**
+   * Resume locally and sync to server time
+   */
+  resumeLocally() {
+    this.localPlaybackState.isLocallyPaused = false;
+    this.localPlaybackState.localPauseTime = 0;
+    this.localPlaybackState.localPausePosition = 0;
+
+    this.requestClientResume();
+    console.log(`▶️ Resuming locally - will sync to server time`);
+  }
+
+  /**
+   * Check if currently paused locally
+   */
+  isLocallyPaused(): boolean {
+    return this.localPlaybackState.isLocallyPaused;
   }
 
   private setupEventHandlers() {
@@ -283,14 +347,31 @@ export class WebSocketMusicSync {
       });
     }
 
-    // Log important events
+    // Handle server state sync messages
+    if (message.type === "server_state_sync") {
+      console.log(`🎵 Server state sync:`, {
+        isServerPlaying: message.isServerPlaying,
+        position: message.playbackState?.position,
+        serverTime: message.serverTime,
+      });
+    }
+
+    // Handle client pause acknowledgments
+    if (message.type === "client_pause_ack") {
+      console.log(`✅ Client pause acknowledged by server`);
+    }
+
+    // Log important server events
     if (
-      ["play_sync", "pause_sync", "seek_sync", "song_change_sync"].includes(
-        message.type,
-      )
+      [
+        "server_play_sync",
+        "seek_sync",
+        "song_change_sync",
+        "server_state_sync",
+      ].includes(message.type)
     ) {
-      console.log(`🎵 Sync event: ${message.type}`, {
-        position: message.position,
+      console.log(`🎵 Server sync event: ${message.type}`, {
+        position: message.position || message.playbackState?.position,
         serverTime: message.serverTime,
         offset: this.serverTimeOffset,
       });
