@@ -566,7 +566,6 @@ const WorkspacePage = () => {
             wsSync.syncSongChange(nextSong);
             setStatus("playing");
             setSyncedPosition(0);
-            setIsLocallyPaused(false);
           } else {
             // Fallback to Firebase sync
             await synchronizedPlayback.changeSong(workspaceId, nextSong);
@@ -750,7 +749,7 @@ const WorkspacePage = () => {
             <button
               onClick={() => navigate("/")}
               className="text-white hover:text-gray-300 transition-colors p-1"
-              title="Quay về trang chọn workspace"
+              title="Quay v�� trang chọn workspace"
             >
               <svg
                 width="20"
