@@ -637,25 +637,11 @@ const WorkspacePage = () => {
       });
     }
 
-    // Poll server immediately for next song
+    // Poll server immediately for next song using new polling method
     setTimeout(async () => {
       try {
-        const roomState = await wsSync.requestRoomState();
-        console.log("📊 Server state after song end:", roomState);
-
-        if (roomState.currentSong) {
-          // Server has next song
-          setCurrentSong(roomState.currentSong);
-          setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
-        } else {
-          // Server is idle
-          setCurrentSong(null);
-          setStatus("paused");
-          setSyncedPosition(0);
-        }
-
-        setServerQueue(roomState.queue || []);
+        console.log("📊 Polling server for next song after playback ended");
+        await pollServerStateOnce();
       } catch (error) {
         console.warn("Failed to get server state after song end:", error);
         // Fallback - assume no more songs
@@ -1058,7 +1044,7 @@ const WorkspacePage = () => {
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Nhập link bài hát để thêm vào playlist nh��m"
+                placeholder="Nhập link bài hát để thêm vào playlist nhóm"
                 className="flex-1 bg-transparent text-gray-400 text-xs font-montserrat outline-none border-none"
                 style={{
                   color: "#A7A7A7",
