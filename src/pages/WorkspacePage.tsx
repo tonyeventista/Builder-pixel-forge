@@ -646,39 +646,33 @@ const WorkspacePage = () => {
   const togglePlayPause = useCallback(async () => {
     if (!currentSong) return;
 
-    console.log(
-      "Toggle play/pause clicked, current status:",
-      status,
-      "locally paused:",
-      isLocallyPaused,
-    );
+    console.log("Toggle play/pause clicked, current status:", status);
 
-    // Handle local pause/resume only
-    if (status === "playing" && !isLocallyPaused) {
-      // Pause locally only
-      if (useWebSocketSync && wsConnected) {
-        wsSync.pauseLocally(syncedPosition);
-      }
-      setIsLocallyPaused(true);
+    // Local play/pause control (doesn't affect server)
+    if (status === "playing") {
       setStatus("paused");
-      console.log("🎵 Paused locally - server continues playing");
-    } else if (isLocallyPaused || status === "paused") {
-      // Resume locally and sync to server time
-      if (useWebSocketSync && wsConnected) {
-        wsSync.resumeLocally();
+      console.log("⏸️ Paused locally - server continues");
+    } else {
+      // Resume and sync to server time
+      try {
+        if (useWebSocketSync && wsConnected) {
+          const roomState = await wsSync.requestRoomState();
+          if (roomState.currentSong && roomState.isPlaying) {
+            setSyncedPosition(roomState.position || 0);
+            setStatus("playing");
+            console.log("▶️ Resumed and synced to server position");
+          } else {
+            setStatus("playing");
+          }
+        } else {
+          setStatus("playing");
+        }
+      } catch (error) {
+        console.warn("Failed to sync on resume:", error);
+        setStatus("playing");
       }
-      setIsLocallyPaused(false);
-      // Status will be updated by server state sync
-      console.log("🎵 Resuming locally - syncing to server time");
     }
-  }, [
-    status,
-    isLocallyPaused,
-    currentSong,
-    syncedPosition,
-    useWebSocketSync,
-    wsConnected,
-  ]);
+  }, [status, currentSong, useWebSocketSync, wsConnected]);
 
   const copyWorkspaceUrl = () => {
     const url = window.location.href;
