@@ -741,8 +741,8 @@ const WorkspacePage = () => {
                 lineHeight: "16px",
               }}
             >
-              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nhạc cùng
-              nhé babe
+              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nh��c
+              cùng nhé babe
             </div>
           </div>
 
@@ -873,7 +873,7 @@ const WorkspacePage = () => {
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Nhập link bài hát, chỉ hỗ trợ Youtube"
+                placeholder="Nhập link bài hát để thêm vào playlist nhóm"
                 className="flex-1 bg-transparent text-gray-400 text-xs font-montserrat outline-none border-none"
                 style={{
                   color: "#A7A7A7",
@@ -939,10 +939,10 @@ const WorkspacePage = () => {
         <div className="w-full flex flex-col space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full">
               <button
                 onClick={() => navigate("/")}
-                className="text-white hover:text-gray-300 transition-colors p-1"
+                className="flex items-center justify-center w-8 h-8 text-white hover:text-gray-300 transition-colors rounded-md hover:bg-white/10"
                 title="Quay về trang chọn workspace"
               >
                 <svg
@@ -950,6 +950,7 @@ const WorkspacePage = () => {
                   height="20"
                   viewBox="0 0 24 24"
                   fill="currentColor"
+                  className="flex-shrink-0"
                 >
                   <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
                 </svg>
@@ -959,8 +960,15 @@ const WorkspacePage = () => {
                 alt="ZONE Logo"
                 className="w-[100px] h-[29px]"
               />
+              {currentSong && status === "playing" && (
+                <div className="flex items-center gap-1 w-full justify-end">
+                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  <span className="text-green-400 text-xs font-montserrat">
+                    SYNC
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="w-3 h-3 bg-green-400 rounded-full" />
           </div>
 
           <div className="h-px bg-gray-600/40 flex-shrink-0" />
@@ -971,20 +979,6 @@ const WorkspacePage = () => {
               <div className="text-gray-400 font-bold text-xs uppercase tracking-wide font-montserrat">
                 {workspaceId}
               </div>
-              {currentSong && status === "playing" && (
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                  <span className="text-green-400 text-xs font-montserrat">
-                    {wsConnected ? "WS-SYNC" : "SYNC"}
-                  </span>
-                  {wsConnected && (
-                    <div
-                      className="w-1 h-1 bg-blue-400 rounded-full animate-pulse ml-1"
-                      title="WebSocket connected"
-                    />
-                  )}
-                </div>
-              )}
               <button
                 onClick={copyWorkspaceUrl}
                 className="hover:opacity-75 transition-opacity"
@@ -1098,7 +1092,7 @@ const WorkspacePage = () => {
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Nhập link bài hát, chỉ hỗ trợ Youtube"
+                placeholder="Nhập link bài hát để thêm vào playlist nhóm"
                 className="flex-1 bg-transparent text-gray-400 text-xs font-montserrat outline-none"
               />
             </div>

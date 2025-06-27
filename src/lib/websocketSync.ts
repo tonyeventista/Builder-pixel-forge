@@ -30,8 +30,16 @@ export class WebSocketMusicSync {
   private isConnecting = false;
   private serverTimeOffset = 0;
 
-  constructor(url: string = "ws://localhost:8080") {
-    this.url = url;
+  constructor(url: string = "") {
+    // Auto-detect WebSocket URL based on environment
+    if (!url) {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host; // includes port
+      this.url = `${protocol}//${host}/ws`;
+      console.log("🔗 WebSocket URL:", this.url);
+    } else {
+      this.url = url;
+    }
     this.setupEventHandlers();
   }
 
@@ -78,9 +86,12 @@ export class WebSocketMusicSync {
         };
 
         this.ws.onerror = (error) => {
-          console.error("❌ WebSocket error:", error);
+          console.error("❌ WebSocket error - trying to connect to:", this.url);
+          console.error("Error details:", error);
           this.isConnecting = false;
-          reject(error);
+          reject(
+            new Error(`Failed to connect to WebSocket server at ${this.url}`),
+          );
         };
       } catch (error) {
         this.isConnecting = false;
