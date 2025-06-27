@@ -89,6 +89,18 @@ class MusicSyncServer {
         this.handleSyncRequest(ws);
         break;
 
+      case "server_play":
+        this.handleServerPlay(ws, message);
+        break;
+
+      case "client_pause":
+        this.handleClientPause(ws, message);
+        break;
+
+      case "client_resume":
+        this.handleClientResume(ws, message);
+        break;
+
       default:
         this.sendError(ws, `Unknown message type: ${message.type}`);
     }
@@ -139,6 +151,9 @@ class MusicSyncServer {
       clientCount: room.clients.size,
     });
 
+    // Also send current server state for immediate sync
+    this.sendCurrentServerState(ws, room);
+
     // Notify other clients in room
     this.broadcastToRoom(
       roomId,
@@ -183,9 +198,42 @@ class MusicSyncServer {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
 
+    // Only handle local client pause/resume - don't change server state
+    console.log(
+      `🎵 Client ${client.id} requested local play - no server state change`,
+    );
+
+    // Send current server state to requesting client
+    this.sendCurrentServerState(ws, room);
+  }
+
+  handlePause(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    // Only handle local client pause/resume - don't change server state
+    console.log(
+      `⏸️ Client ${client.id} requested local pause - no server state change`,
+    );
+
+    // Send current server state to requesting client for potential resume sync
+    this.sendCurrentServerState(ws, room);
+  }
+
+  handleServerPlay(ws, message) {
+    // NEW: Only for server-controlled playback (when adding songs)
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
     const serverTime = Date.now();
 
-    // Update room playback state
+    // Update room playback state - server authoritative
     room.playbackState = {
       ...room.playbackState,
       isPlaying: true,
@@ -198,7 +246,7 @@ class MusicSyncServer {
 
     // Broadcast to all clients in room
     this.broadcastToRoom(client.roomId, {
-      type: "play_sync",
+      type: "server_play_sync",
       position: message.position || 0,
       serverTime,
       startTime: room.playbackState.startTime,
@@ -207,45 +255,7 @@ class MusicSyncServer {
     });
 
     console.log(
-      `▶️ Play triggered in room ${client.roomId} at position ${message.position}s`,
-    );
-  }
-
-  handlePause(ws, message) {
-    const client = this.clients.get(ws);
-    if (!client.roomId) return;
-
-    const room = this.rooms.get(client.roomId);
-    if (!room) return;
-
-    const serverTime = Date.now();
-
-    // Calculate current position based on server time
-    let currentPosition = message.position || 0;
-    if (room.playbackState.isPlaying && room.playbackState.startTime) {
-      currentPosition = (serverTime - room.playbackState.startTime) / 1000;
-    }
-
-    // Update room playback state
-    room.playbackState = {
-      ...room.playbackState,
-      isPlaying: false,
-      position: currentPosition,
-      startTime: null,
-      lastUpdated: serverTime,
-      triggeredBy: client.id,
-    };
-
-    // Broadcast to all clients in room
-    this.broadcastToRoom(client.roomId, {
-      type: "pause_sync",
-      position: currentPosition,
-      serverTime,
-      triggeredBy: client.id,
-    });
-
-    console.log(
-      `⏸️ Pause triggered in room ${client.roomId} at position ${currentPosition}s`,
+      `▶️ Server play triggered in room ${client.roomId} at position ${message.position}s`,
     );
   }
 
@@ -294,7 +304,7 @@ class MusicSyncServer {
 
     const serverTime = Date.now();
 
-    // Update room playback state
+    // Update room playback state - auto-start new song on server
     room.playbackState = {
       ...room.playbackState,
       currentSong: message.song,
@@ -318,6 +328,51 @@ class MusicSyncServer {
       `🎵 Song changed in room ${client.roomId}:`,
       message.song?.title,
     );
+  }
+
+  handleClientPause(ws, message) {
+    const client = this.clients.get(ws);
+    console.log(`⏸️ Client ${client.id} paused locally`);
+
+    // Just acknowledge - no server state change
+    this.sendMessage(ws, {
+      type: "client_pause_ack",
+      clientId: client.id,
+      timestamp: Date.now(),
+    });
+  }
+
+  handleClientResume(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    console.log(`▶️ Client ${client.id} resuming - syncing to server time`);
+
+    // Send current server state for resume sync
+    this.sendCurrentServerState(ws, room);
+  }
+
+  sendCurrentServerState(ws, room) {
+    const serverTime = Date.now();
+    let currentPosition = room.playbackState.position;
+
+    // Calculate real-time position if server is playing
+    if (room.playbackState.isPlaying && room.playbackState.startTime) {
+      currentPosition = (serverTime - room.playbackState.startTime) / 1000;
+    }
+
+    this.sendMessage(ws, {
+      type: "server_state_sync",
+      playbackState: {
+        ...room.playbackState,
+        position: currentPosition,
+      },
+      serverTime,
+      isServerPlaying: room.playbackState.isPlaying,
+    });
   }
 
   handleSyncRequest(ws) {
