@@ -440,7 +440,7 @@ const WorkspacePage = () => {
 
         // Cleanup WebSocket and polling
         if (useWebSocketSync) {
-          wsSync.stopPolling();
+          wsSync.stopPolling(); // This will stop any remaining polling
           wsSync.leaveRoom();
           wsSync.disconnect();
         }
