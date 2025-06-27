@@ -4,6 +4,8 @@ interface SynchronizedYouTubePlayerProps {
   videoId: string | null;
   isPlaying: boolean;
   startPosition?: number; // Position to start/seek to
+  isLocallyPaused?: boolean; // New: indicates if user paused locally
+  serverPlaying?: boolean; // New: indicates if server is playing
   onReady?: () => void;
   onEnd?: () => void;
   onTimeUpdate?: (currentTime: number) => void;
@@ -15,6 +17,8 @@ export const SynchronizedYouTubePlayer = memo(
     videoId,
     isPlaying,
     startPosition = 0,
+    isLocallyPaused = false,
+    serverPlaying = false,
     onReady,
     onEnd,
     onTimeUpdate,
@@ -38,14 +42,23 @@ export const SynchronizedYouTubePlayer = memo(
       }
     }, [videoId, currentVideoId, onReady]);
 
-    // Handle play/pause and seeking
+    // Handle play/pause and seeking with local pause consideration
     useEffect(() => {
       if (isPlayerReady && iframeRef.current && currentVideoId) {
         try {
-          console.log("Controlling player:", { isPlaying, startPosition });
+          // Determine actual playback state: pause if locally paused OR if not playing
+          const shouldPlay = isPlaying && !isLocallyPaused;
 
-          // Seek to start position if provided and greater than 5 seconds
-          if (startPosition > 5) {
+          console.log("Controlling player:", {
+            isPlaying,
+            isLocallyPaused,
+            serverPlaying,
+            shouldPlay,
+            startPosition,
+          });
+
+          // Seek to start position if provided and greater than 3 seconds
+          if (startPosition > 3) {
             console.log("Seeking to position:", startPosition);
             iframeRef.current.contentWindow?.postMessage(
               `{"event":"command","func":"seekTo","args":[${startPosition}, true]}`,
@@ -53,7 +66,7 @@ export const SynchronizedYouTubePlayer = memo(
             );
             // Small delay before play/pause command
             setTimeout(() => {
-              if (isPlaying) {
+              if (shouldPlay) {
                 iframeRef.current?.contentWindow?.postMessage(
                   '{"event":"command","func":"playVideo","args":""}',
                   "*",
@@ -67,7 +80,7 @@ export const SynchronizedYouTubePlayer = memo(
             }, 500);
           } else {
             // Control playback immediately if no seeking needed
-            if (isPlaying) {
+            if (shouldPlay) {
               iframeRef.current.contentWindow?.postMessage(
                 '{"event":"command","func":"playVideo","args":""}',
                 "*",
@@ -83,11 +96,21 @@ export const SynchronizedYouTubePlayer = memo(
           console.warn("YouTube player control error:", error);
         }
       }
-    }, [isPlayerReady, isPlaying, startPosition, currentVideoId]);
+    }, [
+      isPlayerReady,
+      isPlaying,
+      isLocallyPaused,
+      serverPlaying,
+      startPosition,
+      currentVideoId,
+    ]);
 
-    // Start time tracking when playing
+    // Start time tracking when playing (but not when locally paused)
     useEffect(() => {
-      if (isPlaying && isPlayerReady && onTimeUpdate) {
+      const shouldTrackTime =
+        isPlaying && !isLocallyPaused && isPlayerReady && onTimeUpdate;
+
+      if (shouldTrackTime) {
         timeUpdateInterval.current = setInterval(() => {
           if (iframeRef.current) {
             try {
@@ -113,7 +136,7 @@ export const SynchronizedYouTubePlayer = memo(
           clearInterval(timeUpdateInterval.current);
         }
       };
-    }, [isPlaying, isPlayerReady, onTimeUpdate]);
+    }, [isPlaying, isLocallyPaused, isPlayerReady, onTimeUpdate]);
 
     // Listen for messages from YouTube player
     useEffect(() => {
