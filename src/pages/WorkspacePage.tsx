@@ -41,12 +41,13 @@ const WorkspacePage = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasSyncedFromFirebase, setHasSyncedFromFirebase] = useState(false);
 
-  // Synchronized playback state
+  // Server-authoritative playback state
   const [syncedPosition, setSyncedPosition] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState(0);
-  const [isHost, setIsHost] = useState(false); // True if this user controls playback
   const [useWebSocketSync, setUseWebSocketSync] = useState(true); // Enable WebSocket for ultra-fast sync
   const [wsConnected, setWsConnected] = useState(false);
+  const [serverPlaybackState, setServerPlaybackState] = useState<any>(null);
+  const [isLocallyPaused, setIsLocallyPaused] = useState(false);
 
   // Helper function to fetch YouTube video title
   const fetchYouTubeTitle = async (
@@ -127,30 +128,42 @@ const WorkspacePage = () => {
       // Join room
       await wsSync.joinRoom(workspaceId);
 
-      // Setup event handlers
-      wsSync.on("play_sync", (message) => {
-        console.log("📡 WebSocket play sync:", message);
-        const currentPos = wsSync.calculateCurrentPosition({
+      // Setup event handlers for server-authoritative model
+      wsSync.on("server_play_sync", (message) => {
+        console.log("📡 Server play sync:", message);
+        const newServerState = {
           isPlaying: true,
           position: message.position,
           startTime: message.startTime,
           currentSong: null,
           lastUpdated: message.serverTime,
-        });
+        };
+        setServerPlaybackState(newServerState);
+        const currentPos = wsSync.calculateCurrentPosition(newServerState);
         setSyncedPosition(currentPos);
         setStatus("playing");
+        setIsLocallyPaused(false); // Reset local pause when server starts playing
       });
 
-      wsSync.on("pause_sync", (message) => {
-        console.log("📡 WebSocket pause sync:", message);
-        setSyncedPosition(message.position);
-        setStatus("paused");
+      wsSync.on("server_state_sync", (message) => {
+        console.log("📡 Server state sync:", message);
+        setServerPlaybackState(message.playbackState);
+        const currentPos = wsSync.calculateCurrentPosition(
+          message.playbackState,
+        );
+        setSyncedPosition(currentPos);
+        // Only update status if not locally paused
+        if (!wsSync.isLocallyPaused()) {
+          setStatus(message.isServerPlaying ? "playing" : "paused");
+        }
       });
 
       wsSync.on("seek_sync", (message) => {
         console.log("📡 WebSocket seek sync:", message);
         setSyncedPosition(message.position);
-        setStatus(message.isPlaying ? "playing" : "paused");
+        if (!wsSync.isLocallyPaused()) {
+          setStatus(message.isPlaying ? "playing" : "paused");
+        }
       });
 
       wsSync.on("song_change_sync", (message) => {
@@ -159,6 +172,15 @@ const WorkspacePage = () => {
           setCurrentSong(message.song);
           setSyncedPosition(0);
           setStatus("playing");
+          setIsLocallyPaused(false); // Reset local pause on song change
+          // Update server state
+          setServerPlaybackState({
+            isPlaying: true,
+            position: 0,
+            startTime: message.startTime,
+            currentSong: message.song,
+            lastUpdated: message.serverTime,
+          });
         }
       });
 
@@ -167,6 +189,7 @@ const WorkspacePage = () => {
         if (message.playbackState && message.playbackState.currentSong) {
           // Sync to existing playback state
           setCurrentSong(message.playbackState.currentSong);
+          setServerPlaybackState(message.playbackState);
           const currentPos = wsSync.calculateCurrentPosition(
             message.playbackState,
           );
@@ -393,19 +416,23 @@ const WorkspacePage = () => {
         setStatus("loading");
         setCurrentSong(newItem);
 
-        // Check if there's existing playback first
-        const existingPlayback =
-          await synchronizedPlayback.checkExistingPlayback(workspaceId);
-        if (!existingPlayback) {
-          // Only start synchronized playback if no one else is playing
-          try {
+        // Auto-start playback on server when adding first song
+        try {
+          if (useWebSocketSync && wsConnected) {
+            // Use WebSocket for server-controlled playback
+            wsSync.serverPlay(0, newItem.id);
+            setStatus("playing");
+            setSyncedPosition(0);
+            setIsLocallyPaused(false);
+          } else {
+            // Fallback to Firebase sync
             await synchronizedPlayback.startPlayback(workspaceId, newItem, 0);
             setStatus("playing");
             setSyncedPosition(0);
-          } catch (error) {
-            console.warn("Failed to start synchronized playback:", error);
-            setStatus("playing");
           }
+        } catch (error) {
+          console.warn("Failed to start server playback:", error);
+          setStatus("playing");
         }
       } else {
         setQueue([...queue, newItem]);
@@ -456,14 +483,15 @@ const WorkspacePage = () => {
       setCurrentSong(nextSong);
       setQueue(queue.slice(1));
 
-      // Start synchronized playback for new song
+      // Server automatically starts playing new song
       if (workspaceId) {
         try {
           if (useWebSocketSync && wsConnected) {
-            // Use WebSocket for ultra-fast sync
+            // Use WebSocket for server-controlled song change
             wsSync.syncSongChange(nextSong);
             setStatus("playing");
             setSyncedPosition(0);
+            setIsLocallyPaused(false);
           } else {
             // Fallback to Firebase sync
             await synchronizedPlayback.changeSong(workspaceId, nextSong);
@@ -492,15 +520,17 @@ const WorkspacePage = () => {
   };
 
   const handlePlayerReady = useCallback(async () => {
-    console.log("Player ready - checking playback state");
+    console.log("Player ready - syncing to server state");
 
-    // Check if there's existing synchronized playback
-    if (workspaceId) {
+    // Request current server state when player is ready
+    if (useWebSocketSync && wsConnected) {
+      wsSync.requestSync();
+    } else if (workspaceId) {
+      // Fallback to Firebase sync
       const existingPlayback =
         await synchronizedPlayback.checkExistingPlayback(workspaceId);
 
       if (existingPlayback) {
-        // Join existing playback - auto-play at current position
         const currentPos =
           synchronizedPlayback.calculateCurrentPosition(existingPlayback);
         setSyncedPosition(currentPos);
@@ -514,23 +544,9 @@ const WorkspacePage = () => {
         } else {
           setStatus("paused");
         }
-      } else if (currentSong) {
-        // No existing playback but we have a song - start playing
-        console.log("No existing playback - auto-starting new song");
-        try {
-          await synchronizedPlayback.startPlayback(workspaceId, currentSong, 0);
-          setStatus("playing");
-          setSyncedPosition(0);
-        } catch (error) {
-          console.warn("Failed to start playback:", error);
-          setStatus("playing");
-        }
       }
-    } else {
-      // Fallback - just play locally
-      setStatus("playing");
     }
-  }, [workspaceId, currentSong]);
+  }, [workspaceId, useWebSocketSync, wsConnected]);
 
   const handlePlayerEnd = useCallback(() => {
     setTimeout(() => {
@@ -546,30 +562,41 @@ const WorkspacePage = () => {
   }, [queue]);
 
   const togglePlayPause = useCallback(async () => {
-    if (!currentSong || !workspaceId) return;
+    if (!currentSong) return;
 
-    console.log("Toggle play/pause clicked, current status:", status);
+    console.log(
+      "Toggle play/pause clicked, current status:",
+      status,
+      "locally paused:",
+      isLocallyPaused,
+    );
 
-    try {
-      if (status === "playing") {
-        // Pause for everyone in the room
-        await synchronizedPlayback.pausePlayback(workspaceId, syncedPosition);
-        setStatus("paused");
-      } else {
-        // Play for everyone in the room
-        await synchronizedPlayback.startPlayback(
-          workspaceId,
-          currentSong,
-          syncedPosition,
-        );
-        setStatus("playing");
+    // Handle local pause/resume only
+    if (status === "playing" && !isLocallyPaused) {
+      // Pause locally only
+      if (useWebSocketSync && wsConnected) {
+        wsSync.pauseLocally(syncedPosition);
       }
-    } catch (error) {
-      console.warn("Failed to sync playback:", error);
-      // Fallback to local state change
-      setStatus((prev) => (prev === "playing" ? "paused" : "playing"));
+      setIsLocallyPaused(true);
+      setStatus("paused");
+      console.log("🎵 Paused locally - server continues playing");
+    } else if (isLocallyPaused || status === "paused") {
+      // Resume locally and sync to server time
+      if (useWebSocketSync && wsConnected) {
+        wsSync.resumeLocally();
+      }
+      setIsLocallyPaused(false);
+      // Status will be updated by server state sync
+      console.log("🎵 Resuming locally - syncing to server time");
     }
-  }, [status, currentSong, workspaceId, syncedPosition]);
+  }, [
+    status,
+    isLocallyPaused,
+    currentSong,
+    syncedPosition,
+    useWebSocketSync,
+    wsConnected,
+  ]);
 
   const copyWorkspaceUrl = () => {
     const url = window.location.href;
@@ -924,11 +951,16 @@ const WorkspacePage = () => {
             videoId={currentSong.videoId || ""}
             isPlaying={status === "playing"}
             startPosition={syncedPosition}
+            isLocallyPaused={isLocallyPaused}
+            serverPlaying={serverPlaybackState?.isPlaying || false}
             onReady={handlePlayerReady}
             onEnd={handlePlayerEnd}
             onTimeUpdate={(currentTime) => {
-              setSyncedPosition(currentTime);
-              setLastSyncTime(Date.now());
+              // Only update position if not locally paused
+              if (!isLocallyPaused) {
+                setSyncedPosition(currentTime);
+                setLastSyncTime(Date.now());
+              }
             }}
           />
         </div>
