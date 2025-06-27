@@ -40,7 +40,6 @@ export class WebSocketMusicSync {
     } else {
       this.url = url;
     }
-    this.url = url;
     this.setupEventHandlers();
   }
 
