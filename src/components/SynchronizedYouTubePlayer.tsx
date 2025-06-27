@@ -44,8 +44,8 @@ export const SynchronizedYouTubePlayer = memo(
         try {
           console.log("Controlling player:", { isPlaying, startPosition });
 
-          // Seek to start position if provided and greater than 5 seconds
-          if (startPosition > 5) {
+          // Seek to start position if provided and greater than 3 seconds
+          if (startPosition > 3) {
             console.log("Seeking to position:", startPosition);
             iframeRef.current.contentWindow?.postMessage(
               `{"event":"command","func":"seekTo","args":[${startPosition}, true]}`,

@@ -41,66 +41,127 @@ const WorkspacePage = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasSyncedFromFirebase, setHasSyncedFromFirebase] = useState(false);
 
-  // Synchronized playback state
+  // Polling-based sync state
   const [syncedPosition, setSyncedPosition] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState(0);
-  const [isHost, setIsHost] = useState(false); // True if this user controls playback
-  const [useWebSocketSync, setUseWebSocketSync] = useState(true); // Enable WebSocket for ultra-fast sync
+  const [useWebSocketSync, setUseWebSocketSync] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+  const [serverQueue, setServerQueue] = useState<Song[]>([]);
+  const [isPolling, setIsPolling] = useState(false);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
+    null,
+  );
+  const [isFading, setIsFading] = useState(false);
 
-  // Helper function to fetch YouTube video title
+  // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
     videoId: string,
   ): Promise<{ title: string; isValid: boolean }> => {
     // Validate videoId format before making API calls
     if (!videoId || videoId.length !== 11) {
-      return { title: `Video ${videoId}`, isValid: false };
+      return { title: `Invalid Video ID`, isValid: false };
     }
+
+    // Create fetch with timeout
+    const fetchWithTimeout = async (url: string, timeout = 8000) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; MusicApp/1.0)",
+          },
+        });
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    };
 
     try {
       // Use YouTube oEmbed API to get video title
-      const response = await fetch(
+      console.log(`🔍 Fetching title for video ${videoId}...`);
+      const response = await fetchWithTimeout(
         `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
       );
 
       if (response.ok) {
         const data = await response.json();
-        if (data.title) {
-          return { title: data.title, isValid: true };
+        if (data.title && data.title.trim()) {
+          console.log(`✅ Got title: ${data.title}`);
+          return { title: data.title.trim(), isValid: true };
         }
       } else if (response.status === 400 || response.status === 404) {
-        // Video not found or bad request
         console.warn(
-          `YouTube API returned ${response.status} for video ${videoId}`,
+          `❌ YouTube API returned ${response.status} for video ${videoId} - video not found`,
         );
-        return { title: `Video ${videoId}`, isValid: false };
+        return { title: `Video không tồn tại`, isValid: false };
+      } else if (response.status === 429) {
+        console.warn(`⚠️ YouTube API rate limited for video ${videoId}`);
+        // Continue to fallback
       }
     } catch (error) {
-      console.warn("YouTube oEmbed failed:", error);
+      if (error.name === "AbortError") {
+        console.warn(`⏱️ YouTube API timeout for video ${videoId}`);
+      } else {
+        console.warn("YouTube oEmbed failed:", error);
+      }
     }
 
-    // Try noembed.com as fallback
+    // Try noembed.com as fallback with shorter timeout
     try {
-      const response = await fetch(
+      console.log(`🔄 Trying fallback API for video ${videoId}...`);
+      const response = await fetchWithTimeout(
         `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`,
+        5000,
       );
 
       if (response.ok) {
         const data = await response.json();
-        if (data.title && !data.error) {
-          return { title: data.title, isValid: true };
+        if (data.title && data.title.trim() && !data.error) {
+          console.log(`✅ Fallback got title: ${data.title}`);
+          return { title: data.title.trim(), isValid: true };
         }
       } else if (response.status === 400 || response.status === 404) {
         console.warn(
-          `Fallback API returned ${response.status} for video ${videoId}`,
+          `❌ Fallback API returned ${response.status} for video ${videoId}`,
         );
+        return { title: `Video không tồn tại`, isValid: false };
       }
     } catch (fallbackError) {
-      console.warn("Fallback API failed:", fallbackError);
+      if (fallbackError.name === "AbortError") {
+        console.warn(`⏱️ Fallback API timeout for video ${videoId}`);
+      } else {
+        console.warn("Fallback API failed:", fallbackError);
+      }
     }
 
-    // If both APIs fail, assume invalid
-    return { title: `Video ${videoId}`, isValid: false };
+    // If both APIs fail, try to extract from URL params as last resort
+    try {
+      console.log(`🔄 Trying direct method for video ${videoId}...`);
+      // This is a simple check - if we can't get title, at least verify the video exists
+      const testResponse = await fetchWithTimeout(
+        `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+        3000,
+      );
+
+      if (testResponse.ok) {
+        console.log(
+          `✅ Video ${videoId} appears to exist but title unavailable`,
+        );
+        return { title: `🎵 Video ${videoId}`, isValid: true };
+      }
+    } catch (testError) {
+      console.warn("Direct verification failed:", testError);
+    }
+
+    // All methods failed
+    console.warn(`❌ All methods failed for video ${videoId}`);
+    return { title: `Video không tồn tại hoặc bị lỗi`, isValid: false };
   };
 
   // Helper function to format video titles
@@ -117,6 +178,81 @@ const WorkspacePage = () => {
     return title;
   };
 
+  // Start polling server state
+  const startPollingServerState = () => {
+    if (isPolling) return;
+
+    setIsPolling(true);
+    wsSync.startPolling((roomState) => {
+      console.log("📊 Received server state:", roomState);
+
+      // Update queue from server
+      setServerQueue(roomState.queue || []);
+
+      if (roomState.currentSong) {
+        // Server has a song playing
+        if (!currentSong || currentSong.id !== roomState.currentSong.id) {
+          // Different song - need to sync
+          console.log(
+            "🔄 Syncing to server song:",
+            roomState.currentSong.title,
+          );
+          setCurrentSong(roomState.currentSong);
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        } else {
+          // Same song - just update position
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        }
+      } else {
+        // Server is idle
+        if (currentSong) {
+          console.log("💤 Server is idle - stopping current song");
+          setCurrentSong(null);
+          setStatus("paused");
+          setSyncedPosition(0);
+        }
+      }
+    });
+  };
+
+  // Handle new song notification from server (when server was idle)
+  const handleNewSongFromServer = async (
+    song: Song,
+    startTime: number,
+    wasIdle: boolean,
+  ) => {
+    console.log("🎵 Handling new song from server:", song.title);
+
+    if (currentSong && currentSong.id !== song.id) {
+      // We have a different song playing - need to fade and switch
+      console.log("🎭 Different song playing - fading to new song");
+      await fadeToNewSong(song, startTime);
+    } else {
+      // No song or same song - just update
+      setCurrentSong(song);
+      const position = wsSync.calculateServerPosition(startTime, Date.now());
+      setSyncedPosition(position);
+      setStatus("playing");
+    }
+  };
+
+  // Fade current song and switch to new song
+  const fadeToNewSong = async (newSong: Song, startTime: number) => {
+    setIsFading(true);
+
+    // TODO: Implement audio fading here
+    // For now, just switch immediately
+    setTimeout(() => {
+      setCurrentSong(newSong);
+      const position = wsSync.calculateServerPosition(startTime, Date.now());
+      setSyncedPosition(position);
+      setStatus("playing");
+      setIsFading(false);
+    }, 500);
+  };
+
   // WebSocket initialization function
   const initializeWebSocketSync = async () => {
     try {
@@ -127,54 +263,21 @@ const WorkspacePage = () => {
       // Join room
       await wsSync.joinRoom(workspaceId);
 
-      // Setup event handlers
-      wsSync.on("play_sync", (message) => {
-        console.log("📡 WebSocket play sync:", message);
-        const currentPos = wsSync.calculateCurrentPosition({
-          isPlaying: true,
-          position: message.position,
-          startTime: message.startTime,
-          currentSong: null,
-          lastUpdated: message.serverTime,
-        });
-        setSyncedPosition(currentPos);
-        setStatus("playing");
-      });
-
-      wsSync.on("pause_sync", (message) => {
-        console.log("📡 WebSocket pause sync:", message);
-        setSyncedPosition(message.position);
-        setStatus("paused");
-      });
-
-      wsSync.on("seek_sync", (message) => {
-        console.log("📡 WebSocket seek sync:", message);
-        setSyncedPosition(message.position);
-        setStatus(message.isPlaying ? "playing" : "paused");
-      });
-
-      wsSync.on("song_change_sync", (message) => {
-        console.log("📡 WebSocket song change:", message);
-        if (message.song) {
-          setCurrentSong(message.song);
-          setSyncedPosition(0);
-          setStatus("playing");
-        }
+      // Setup event handlers for new song notifications only
+      wsSync.on("new_song_notification", (message) => {
+        console.log("🎵 New song notification from server:", message);
+        handleNewSongFromServer(
+          message.song,
+          message.startTime,
+          message.wasIdle,
+        );
       });
 
       wsSync.on("room_joined", (message) => {
         console.log("🏠 Joined WebSocket room:", message);
-        if (message.playbackState && message.playbackState.currentSong) {
-          // Sync to existing playback state
-          setCurrentSong(message.playbackState.currentSong);
-          const currentPos = wsSync.calculateCurrentPosition(
-            message.playbackState,
-          );
-          setSyncedPosition(currentPos);
-          setStatus(message.playbackState.isPlaying ? "playing" : "paused");
-        }
+        // Start polling immediately after joining
+        startPollingServerState();
       });
-
       wsSync.on("error", (message) => {
         console.error("❌ WebSocket error:", message);
         setWsConnected(false);
@@ -310,11 +413,13 @@ const WorkspacePage = () => {
         synchronizedPlayback.unsubscribeFromPlayback(workspaceId);
         synchronizedPlayback.stopSyncCheck();
 
-        // Cleanup WebSocket
+        // Cleanup WebSocket and polling
         if (useWebSocketSync) {
+          wsSync.stopPolling();
           wsSync.leaveRoom();
           wsSync.disconnect();
         }
+        setIsPolling(false);
       } catch (error) {
         // Silent cleanup
       }
@@ -378,73 +483,70 @@ const WorkspacePage = () => {
     }
 
     // Show validation status
-    setError("Đang kiểm tra...");
+    setError("Đang kiểm tra video...");
 
     try {
-      // Create item with temporary title first
+      // First validate the video before adding to queue/current
+      console.log(`🔍 Validating video ${videoId}...`);
+      const result = await fetchYouTubeTitle(videoId);
+
+      if (!result.isValid) {
+        setError(result.title || "Video không tồn tại hoặc bị lỗi");
+        return;
+      }
+
+      // Create item with real title
       const newItem: Song = {
         id: Date.now().toString(),
-        title: `🎵 Đang tải...`,
+        title: result.title,
         url: normalizedUrl,
         videoId,
       };
 
-      if (!currentSong) {
-        setStatus("loading");
-        setCurrentSong(newItem);
+      // Add song to server
+      try {
+        if (useWebSocketSync && wsConnected) {
+          const setAsCurrent = !currentSong;
+          const response = await wsSync.addSongToServer(newItem, setAsCurrent);
 
-        // Check if there's existing playback first
-        const existingPlayback =
-          await synchronizedPlayback.checkExistingPlayback(workspaceId);
-        if (!existingPlayback) {
-          // Only start synchronized playback if no one else is playing
-          try {
-            await synchronizedPlayback.startPlayback(workspaceId, newItem, 0);
+          if (response.success) {
+            if (response.setAsCurrent) {
+              console.log("🎵 Song set as current on server");
+              setStatus("loading");
+              setCurrentSong(newItem);
+              // Server will notify about playback start
+            } else {
+              console.log("🎵 Song added to server queue");
+              // Will be updated via polling
+            }
+          }
+        } else {
+          // Fallback to local queue management
+          if (!currentSong) {
+            setCurrentSong(newItem);
             setStatus("playing");
             setSyncedPosition(0);
-          } catch (error) {
-            console.warn("Failed to start synchronized playback:", error);
-            setStatus("playing");
+          } else {
+            setQueue([...queue, newItem]);
           }
         }
-      } else {
-        setQueue([...queue, newItem]);
+      } catch (error) {
+        console.warn("Failed to add song to server:", error);
+        // Fallback to local management
+        if (!currentSong) {
+          setCurrentSong(newItem);
+          setStatus("playing");
+        } else {
+          setQueue([...queue, newItem]);
+        }
       }
 
       setInputUrl("");
       setError("");
-
-      // Validate URL by trying to fetch video information in background
-      const result = await fetchYouTubeTitle(videoId);
-
-      // Update with real title or show error if validation failed
-      if (result.isValid) {
-        const updatedItem = { ...newItem, title: result.title };
-
-        if (!currentSong || currentSong.id === newItem.id) {
-          setCurrentSong(updatedItem);
-        } else {
-          setQueue((prevQueue) =>
-            prevQueue.map((song) =>
-              song.id === newItem.id ? updatedItem : song,
-            ),
-          );
-        }
-      } else {
-        // Remove the invalid item and show error
-        if (!currentSong || currentSong.id === newItem.id) {
-          setCurrentSong(null);
-          setStatus("paused");
-        } else {
-          setQueue((prevQueue) =>
-            prevQueue.filter((song) => song.id !== newItem.id),
-          );
-        }
-        setError("Đường d��n không tồn tại hoặc bị lỗi.");
-      }
+      console.log(`✅ Successfully added: ${result.title}`);
     } catch (error) {
       // Validation failed
-      setError("Đường dẫn không tồn tại hoặc bị lỗi.");
+      setError("Có lỗi xảy ra khi kiểm tra video");
       console.warn("URL validation failed:", error);
     }
   };
@@ -456,11 +558,11 @@ const WorkspacePage = () => {
       setCurrentSong(nextSong);
       setQueue(queue.slice(1));
 
-      // Start synchronized playback for new song
+      // Server automatically starts playing new song
       if (workspaceId) {
         try {
           if (useWebSocketSync && wsConnected) {
-            // Use WebSocket for ultra-fast sync
+            // Use WebSocket for server-controlled song change
             wsSync.syncSongChange(nextSong);
             setStatus("playing");
             setSyncedPosition(0);
@@ -492,84 +594,84 @@ const WorkspacePage = () => {
   };
 
   const handlePlayerReady = useCallback(async () => {
-    console.log("Player ready - checking playback state");
+    console.log("Player ready - requesting initial server state");
 
-    // Check if there's existing synchronized playback
-    if (workspaceId) {
-      const existingPlayback =
-        await synchronizedPlayback.checkExistingPlayback(workspaceId);
-
-      if (existingPlayback) {
-        // Join existing playback - auto-play at current position
-        const currentPos =
-          synchronizedPlayback.calculateCurrentPosition(existingPlayback);
-        setSyncedPosition(currentPos);
-
-        if (existingPlayback.type === "play") {
-          setStatus("playing");
-          console.log(
-            "Joining existing playback - auto-playing at position:",
-            currentPos,
-          );
-        } else {
-          setStatus("paused");
-        }
-      } else if (currentSong) {
-        // No existing playback but we have a song - start playing
-        console.log("No existing playback - auto-starting new song");
-        try {
-          await synchronizedPlayback.startPlayback(workspaceId, currentSong, 0);
-          setStatus("playing");
-          setSyncedPosition(0);
-        } catch (error) {
-          console.warn("Failed to start playback:", error);
-          setStatus("playing");
-        }
-      }
-    } else {
-      // Fallback - just play locally
-      setStatus("playing");
+    // Request current server state when player is ready
+    if (useWebSocketSync && wsConnected && !isPolling) {
+      startPollingServerState();
     }
-  }, [workspaceId, currentSong]);
+  }, [useWebSocketSync, wsConnected, isPolling]);
 
   const handlePlayerEnd = useCallback(() => {
-    setTimeout(() => {
-      if (queue.length > 0) {
-        // Play next song if available
-        playNext();
-      } else {
-        // Clear current song when finished and no more songs
+    console.log("🎵 Song ended - notifying server and polling for next");
+
+    // Notify server that song ended
+    if (useWebSocketSync && wsConnected) {
+      wsSync.sendMessage({
+        type: "playback_ended",
+        clientTime: Date.now(),
+      });
+    }
+
+    // Poll server immediately for next song
+    setTimeout(async () => {
+      try {
+        const roomState = await wsSync.requestRoomState();
+        console.log("📊 Server state after song end:", roomState);
+
+        if (roomState.currentSong) {
+          // Server has next song
+          setCurrentSong(roomState.currentSong);
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        } else {
+          // Server is idle
+          setCurrentSong(null);
+          setStatus("paused");
+          setSyncedPosition(0);
+        }
+
+        setServerQueue(roomState.queue || []);
+      } catch (error) {
+        console.warn("Failed to get server state after song end:", error);
+        // Fallback - assume no more songs
         setCurrentSong(null);
         setStatus("paused");
+        setSyncedPosition(0);
       }
-    }, 2000);
-  }, [queue]);
+    }, 1000);
+  }, [useWebSocketSync, wsConnected]);
 
   const togglePlayPause = useCallback(async () => {
-    if (!currentSong || !workspaceId) return;
+    if (!currentSong) return;
 
     console.log("Toggle play/pause clicked, current status:", status);
 
-    try {
-      if (status === "playing") {
-        // Pause for everyone in the room
-        await synchronizedPlayback.pausePlayback(workspaceId, syncedPosition);
-        setStatus("paused");
-      } else {
-        // Play for everyone in the room
-        await synchronizedPlayback.startPlayback(
-          workspaceId,
-          currentSong,
-          syncedPosition,
-        );
+    // Local play/pause control (doesn't affect server)
+    if (status === "playing") {
+      setStatus("paused");
+      console.log("⏸️ Paused locally - server continues");
+    } else {
+      // Resume and sync to server time
+      try {
+        if (useWebSocketSync && wsConnected) {
+          const roomState = await wsSync.requestRoomState();
+          if (roomState.currentSong && roomState.isPlaying) {
+            setSyncedPosition(roomState.position || 0);
+            setStatus("playing");
+            console.log("▶️ Resumed and synced to server position");
+          } else {
+            setStatus("playing");
+          }
+        } else {
+          setStatus("playing");
+        }
+      } catch (error) {
+        console.warn("Failed to sync on resume:", error);
         setStatus("playing");
       }
-    } catch (error) {
-      console.warn("Failed to sync playback:", error);
-      // Fallback to local state change
-      setStatus((prev) => (prev === "playing" ? "paused" : "playing"));
     }
-  }, [status, currentSong, workspaceId, syncedPosition]);
+  }, [status, currentSong, useWebSocketSync, wsConnected]);
 
   const copyWorkspaceUrl = () => {
     const url = window.location.href;
@@ -647,7 +749,7 @@ const WorkspacePage = () => {
             <button
               onClick={() => navigate("/")}
               className="text-white hover:text-gray-300 transition-colors p-1"
-              title="Quay về trang chọn workspace"
+              title="Quay v�� trang chọn workspace"
             >
               <svg
                 width="20"

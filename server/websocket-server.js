@@ -89,6 +89,30 @@ class MusicSyncServer {
         this.handleSyncRequest(ws);
         break;
 
+      case "server_play":
+        this.handleServerPlay(ws, message);
+        break;
+
+      case "client_pause":
+        this.handleClientPause(ws, message);
+        break;
+
+      case "client_resume":
+        this.handleClientResume(ws, message);
+        break;
+
+      case "playback_ended":
+        this.handlePlaybackEnded(ws, message);
+        break;
+
+      case "get_room_state":
+        this.handleGetRoomState(ws, message);
+        break;
+
+      case "add_song":
+        this.handleAddSong(ws, message);
+        break;
+
       default:
         this.sendError(ws, `Unknown message type: ${message.type}`);
     }
@@ -115,6 +139,7 @@ class MusicSyncServer {
       this.rooms.set(roomId, {
         id: roomId,
         clients: new Set(),
+        queue: [], // Add queue to room
         playbackState: {
           isPlaying: false,
           currentSong: null,
@@ -138,6 +163,9 @@ class MusicSyncServer {
       playbackState: room.playbackState,
       clientCount: room.clients.size,
     });
+
+    // Also send current server state for immediate sync
+    this.sendCurrentServerState(ws, room);
 
     // Notify other clients in room
     this.broadcastToRoom(
@@ -183,9 +211,42 @@ class MusicSyncServer {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
 
+    // Only handle local client pause/resume - don't change server state
+    console.log(
+      `🎵 Client ${client.id} requested local play - no server state change`,
+    );
+
+    // Send current server state to requesting client
+    this.sendCurrentServerState(ws, room);
+  }
+
+  handlePause(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    // Only handle local client pause/resume - don't change server state
+    console.log(
+      `⏸️ Client ${client.id} requested local pause - no server state change`,
+    );
+
+    // Send current server state to requesting client for potential resume sync
+    this.sendCurrentServerState(ws, room);
+  }
+
+  handleServerPlay(ws, message) {
+    // NEW: Only for server-controlled playback (when adding songs)
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
     const serverTime = Date.now();
 
-    // Update room playback state
+    // Update room playback state - server authoritative
     room.playbackState = {
       ...room.playbackState,
       isPlaying: true,
@@ -198,7 +259,7 @@ class MusicSyncServer {
 
     // Broadcast to all clients in room
     this.broadcastToRoom(client.roomId, {
-      type: "play_sync",
+      type: "server_play_sync",
       position: message.position || 0,
       serverTime,
       startTime: room.playbackState.startTime,
@@ -207,45 +268,7 @@ class MusicSyncServer {
     });
 
     console.log(
-      `▶️ Play triggered in room ${client.roomId} at position ${message.position}s`,
-    );
-  }
-
-  handlePause(ws, message) {
-    const client = this.clients.get(ws);
-    if (!client.roomId) return;
-
-    const room = this.rooms.get(client.roomId);
-    if (!room) return;
-
-    const serverTime = Date.now();
-
-    // Calculate current position based on server time
-    let currentPosition = message.position || 0;
-    if (room.playbackState.isPlaying && room.playbackState.startTime) {
-      currentPosition = (serverTime - room.playbackState.startTime) / 1000;
-    }
-
-    // Update room playback state
-    room.playbackState = {
-      ...room.playbackState,
-      isPlaying: false,
-      position: currentPosition,
-      startTime: null,
-      lastUpdated: serverTime,
-      triggeredBy: client.id,
-    };
-
-    // Broadcast to all clients in room
-    this.broadcastToRoom(client.roomId, {
-      type: "pause_sync",
-      position: currentPosition,
-      serverTime,
-      triggeredBy: client.id,
-    });
-
-    console.log(
-      `⏸️ Pause triggered in room ${client.roomId} at position ${currentPosition}s`,
+      `▶️ Server play triggered in room ${client.roomId} at position ${message.position}s`,
     );
   }
 
@@ -294,7 +317,7 @@ class MusicSyncServer {
 
     const serverTime = Date.now();
 
-    // Update room playback state
+    // Update room playback state - auto-start new song on server
     room.playbackState = {
       ...room.playbackState,
       currentSong: message.song,
@@ -318,6 +341,197 @@ class MusicSyncServer {
       `🎵 Song changed in room ${client.roomId}:`,
       message.song?.title,
     );
+  }
+
+  handleClientPause(ws, message) {
+    const client = this.clients.get(ws);
+    console.log(`⏸️ Client ${client.id} paused locally`);
+
+    // Just acknowledge - no server state change
+    this.sendMessage(ws, {
+      type: "client_pause_ack",
+      clientId: client.id,
+      timestamp: Date.now(),
+    });
+  }
+
+  handleClientResume(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    console.log(`▶️ Client ${client.id} resuming - syncing to server time`);
+
+    // Send current server state for resume sync
+    this.sendCurrentServerState(ws, room);
+  }
+
+  handlePlaybackEnded(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    console.log(`🏁 Playback ended in room ${client.roomId} - checking queue`);
+
+    // Check if there are more songs in queue
+    if (room.queue && room.queue.length > 0) {
+      // Play next song from queue
+      const nextSong = room.queue.shift();
+      const serverTime = Date.now();
+
+      room.playbackState = {
+        ...room.playbackState,
+        currentSong: nextSong,
+        position: 0,
+        startTime: serverTime,
+        isPlaying: true,
+        lastUpdated: serverTime,
+        triggeredBy: "server",
+      };
+
+      console.log(`🎵 Auto-playing next song: ${nextSong.title}`);
+
+      // Broadcast new song to all clients
+      this.broadcastToRoom(client.roomId, {
+        type: "new_song_notification",
+        song: nextSong,
+        startTime: serverTime,
+        serverTime: serverTime,
+      });
+    } else {
+      // No more songs - go to idle state
+      room.playbackState = {
+        ...room.playbackState,
+        isPlaying: false,
+        currentSong: null,
+        position: 0,
+        startTime: null,
+        lastUpdated: Date.now(),
+        triggeredBy: client.id,
+      };
+
+      console.log(`💤 Room ${client.roomId} is now idle - no more songs`);
+    }
+  }
+
+  handleGetRoomState(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    const serverTime = Date.now();
+    let currentPosition = 0;
+
+    // Calculate current position if playing
+    if (room.playbackState.isPlaying && room.playbackState.startTime) {
+      currentPosition = Math.max(
+        0,
+        (serverTime - room.playbackState.startTime) / 1000,
+      );
+    }
+
+    // Send complete room state
+    this.sendMessage(ws, {
+      type: "room_state_response",
+      currentSong: room.playbackState.currentSong,
+      queue: room.queue || [],
+      isPlaying: room.playbackState.isPlaying,
+      position: currentPosition,
+      startTime: room.playbackState.startTime,
+      serverTime: serverTime,
+      requestId: message.requestId, // For tracking requests
+    });
+
+    console.log(
+      `📡 Sent room state to client ${client.id}: ${room.playbackState.currentSong?.title || "No song"}`,
+    );
+  }
+
+  handleAddSong(ws, message) {
+    const client = this.clients.get(ws);
+    if (!client.roomId) return;
+
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+
+    const { song, setAsCurrent } = message;
+    const serverTime = Date.now();
+
+    // Initialize queue if not exists
+    if (!room.queue) {
+      room.queue = [];
+    }
+
+    if (setAsCurrent || !room.playbackState.currentSong) {
+      // Set as current song (server was idle or force set)
+      const wasIdle = !room.playbackState.currentSong;
+
+      room.playbackState = {
+        ...room.playbackState,
+        currentSong: song,
+        position: 0,
+        startTime: serverTime,
+        isPlaying: true,
+        lastUpdated: serverTime,
+        triggeredBy: client.id,
+      };
+
+      console.log(
+        `🎵 ${wasIdle ? "Server was idle -" : ""} Set new current song: ${song.title}`,
+      );
+
+      // If server was idle, broadcast to all clients
+      if (wasIdle) {
+        this.broadcastToRoom(client.roomId, {
+          type: "new_song_notification",
+          song: song,
+          startTime: serverTime,
+          serverTime: serverTime,
+          wasIdle: true,
+        });
+      }
+    } else {
+      // Add to queue
+      room.queue.push(song);
+      console.log(
+        `📝 Added to queue: ${song.title} (queue length: ${room.queue.length})`,
+      );
+    }
+
+    // Send confirmation
+    this.sendMessage(ws, {
+      type: "song_added_response",
+      success: true,
+      song: song,
+      setAsCurrent: setAsCurrent || !room.playbackState.currentSong,
+      queueLength: room.queue.length,
+    });
+  }
+
+  sendCurrentServerState(ws, room) {
+    const serverTime = Date.now();
+    let currentPosition = room.playbackState.position;
+
+    // Calculate real-time position if server is playing
+    if (room.playbackState.isPlaying && room.playbackState.startTime) {
+      currentPosition = (serverTime - room.playbackState.startTime) / 1000;
+    }
+
+    this.sendMessage(ws, {
+      type: "server_state_sync",
+      playbackState: {
+        ...room.playbackState,
+        position: currentPosition,
+      },
+      serverTime,
+      isServerPlaying: room.playbackState.isPlaying,
+    });
   }
 
   handleSyncRequest(ws) {
