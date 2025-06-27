@@ -618,13 +618,13 @@ const WorkspacePage = () => {
     }
   };
 
-  const handlePlayerReady = useCallback(async () => {
-    console.log("Player ready - requesting initial server state");
-
-    // Request current server state when player is ready
-    if (useWebSocketSync && wsConnected && !isPolling) {
-      startPollingServerState();
+  const handlePlayerReady = useCallback(() => {
+    console.log("Player ready");
+    // Get initial server state when player is ready (no continuous polling)
+    if (useWebSocketSync && wsConnected) {
+      pollServerStateOnce();
     }
+  }, [useWebSocketSync, wsConnected]);
   }, [useWebSocketSync, wsConnected, isPolling]);
 
   const handlePlayerEnd = useCallback(() => {
