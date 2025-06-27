@@ -741,7 +741,10 @@ const WorkspacePage = () => {
         <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-black" />
 
         {/* Debug Panel - Temporary for server sync monitoring */}
-        <div className="relative z-10 bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4" style={{ width: "375px" }}>
+        <div
+          className="relative z-10 bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4"
+          style={{ width: "375px" }}
+        >
           <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
             🔧 DEBUG - Server Sync Monitor (On-Demand Only)
           </div>
@@ -1141,11 +1144,14 @@ const WorkspacePage = () => {
             <div className="space-y-1 text-xs font-montserrat">
               <div className="text-white">
                 <span className="text-gray-400">Version:</span> {currentVersion}
-                <span className="text-gray-400 ml-3">Poll Count:</span> {debugPollCount}
+                <span className="text-gray-400 ml-3">Poll Count:</span>{" "}
+                {debugPollCount}
               </div>
               <div className="text-white">
-                <span className="text-gray-400">Last Poll:</span> {debugLastPollTime}
+                <span className="text-gray-400">Last Poll:</span>{" "}
+                {debugLastPollTime}
               </div>
+              <div className="text-white">
                 <span className="text-gray-400">Server Song:</span>{" "}
                 {debugServerState?.currentSong
                   ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
