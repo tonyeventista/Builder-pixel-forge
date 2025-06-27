@@ -633,7 +633,7 @@ const WorkspacePage = () => {
   }, [useWebSocketSync, wsConnected]);
 
   const handlePlayerEnd = useCallback(() => {
-    console.log("🎵 Song ended - notifying server and polling for next");
+    console.log("🎵 Song ended - stopping playback");
 
     // Notify server that song ended
     if (useWebSocketSync && wsConnected) {
@@ -643,19 +643,11 @@ const WorkspacePage = () => {
       });
     }
 
-    // Poll server immediately for next song using new polling method
-    setTimeout(async () => {
-      try {
-        console.log("📊 Polling server for next song after playback ended");
-        await pollServerStateOnce();
-      } catch (error) {
-        console.warn("Failed to get server state after song end:", error);
-        // Fallback - assume no more songs
-        setCurrentSong(null);
-        setStatus("paused");
-        setSyncedPosition(0);
-      }
-    }, 1000);
+    // Simply stop playback when song ends (no auto next song)
+    setCurrentSong(null);
+    setStatus("paused");
+    setSyncedPosition(0);
+    console.log("⏹️ Playback stopped - no auto next song");
   }, [useWebSocketSync, wsConnected]);
 
   const togglePlayPause = useCallback(async () => {
