@@ -745,7 +745,7 @@ const WorkspacePage = () => {
           style={{ width: "375px" }}
         >
           <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
-            🔧 DEBUG - Server Sync Monitor
+            🔧 DEBUG - Server Sync Monitor (On-Demand Only)
           </div>
           <div className="space-y-1 text-xs font-montserrat">
             <div className="text-white">
@@ -812,7 +812,7 @@ const WorkspacePage = () => {
             <button
               onClick={() => navigate("/")}
               className="text-white hover:text-gray-300 transition-colors p-1"
-              title="Quay v�� trang chọn workspace"
+              title="Quay v�� trang ch���n workspace"
             >
               <svg
                 width="20"
