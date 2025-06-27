@@ -33,10 +33,16 @@ export class WebSocketMusicSync {
   constructor(url: string = "") {
     // Auto-detect WebSocket URL based on environment
     if (!url) {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.hostname;
-      const port = window.location.hostname === "localhost" ? ":8081" : ":8081";
-      this.url = `${protocol}//${host}${port}`;
+      if (window.location.hostname === "localhost") {
+        // Local development - use separate WebSocket port
+        this.url = "ws://localhost:8081";
+      } else {
+        // Cloud environment - fallback to Firebase sync (disable WebSocket)
+        this.url = "";
+        console.log(
+          "🌐 Cloud environment detected - WebSocket disabled, using Firebase sync",
+        );
+      }
     } else {
       this.url = url;
     }
@@ -48,6 +54,11 @@ export class WebSocketMusicSync {
    */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!this.url) {
+        reject(new Error("WebSocket disabled for cloud environment"));
+        return;
+      }
+
       if (this.ws?.readyState === WebSocket.OPEN) {
         resolve();
         return;
