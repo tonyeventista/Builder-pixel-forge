@@ -300,8 +300,8 @@ const WorkspacePage = () => {
 
       wsSync.on("room_joined", (message) => {
         console.log("🏠 Joined WebSocket room:", message);
-        // Start polling immediately after joining
-        startPollingServerState();
+        // Get initial state after joining room (no continuous polling)
+        pollServerStateOnce();
       });
       wsSync.on("error", (message) => {
         console.error("❌ WebSocket error:", message);
