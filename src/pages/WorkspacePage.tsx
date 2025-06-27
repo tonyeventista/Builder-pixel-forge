@@ -1421,7 +1421,7 @@ const WorkspacePage = () => {
                 lineHeight: "12px",
               }}
             >
-              Version 2.0.0
+              Version {currentVersion}
             </div>
             <div
               className="font-montserrat font-bold text-center"
