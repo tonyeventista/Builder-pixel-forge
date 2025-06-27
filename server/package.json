@@ -1,0 +1,26 @@
+{
+  "name": "youtube-queue-websocket-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for ultra-fast music synchronization",
+  "main": "websocket-server.js",
+  "scripts": {
+    "start": "node websocket-server.js",
+    "dev": "nodemon websocket-server.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "websocket",
+    "music",
+    "synchronization",
+    "real-time"
+  ],
+  "author": "",
+  "license": "MIT"
+}
