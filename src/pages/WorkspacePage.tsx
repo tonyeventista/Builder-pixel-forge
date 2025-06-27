@@ -17,6 +17,7 @@ import {
 import { realtimeService } from "@/lib/realtimeWorkspace";
 import { synchronizedPlayback } from "@/lib/synchronizedPlayback";
 import { wsSync } from "@/lib/websocketSync";
+import { currentVersion } from "@/lib/version";
 
 interface Song {
   id: string;
@@ -52,6 +53,12 @@ const WorkspacePage = () => {
     null,
   );
   const [isFading, setIsFading] = useState(false);
+  const [isLocallyPaused, setIsLocallyPaused] = useState(false);
+
+  // Debug state for server sync monitoring
+  const [debugServerState, setDebugServerState] = useState<any>(null);
+  const [debugLastPollTime, setDebugLastPollTime] = useState<string>("");
+  const [debugPollCount, setDebugPollCount] = useState(0);
 
   // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
@@ -178,16 +185,25 @@ const WorkspacePage = () => {
     return title;
   };
 
-  // Start polling server state
-  const startPollingServerState = () => {
-    if (isPolling) return;
+  // Poll server state on-demand (not continuously)
+  const pollServerStateOnce = async () => {
+    try {
+      console.log("📊 Polling server state once...");
+      const roomState = await wsSync.requestRoomState();
 
-    setIsPolling(true);
-    wsSync.startPolling((roomState) => {
-      console.log("📊 Received server state:", roomState);
+      // Debug: Capture polling information
+      const now = new Date();
+      setDebugServerState(roomState);
+      setDebugLastPollTime(now.toLocaleTimeString("vi-VN"));
+      setDebugPollCount((prev) => prev + 1);
 
-      // Update queue from server
-      setServerQueue(roomState.queue || []);
+      // Update queue from server (already sorted by server by add time)
+      const serverQueue = roomState.queue || [];
+      setServerQueue(serverQueue);
+
+      // Sync local queue with server queue for UI display - maintain server order
+      setQueue(serverQueue);
+      console.log(`�� Synced queue from server: ${serverQueue.length} songs`);
 
       if (roomState.currentSong) {
         // Server has a song playing
@@ -199,11 +215,17 @@ const WorkspacePage = () => {
           );
           setCurrentSong(roomState.currentSong);
           setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
+          // Only update status if not locally paused
+          if (!isLocallyPaused) {
+            setStatus(roomState.isPlaying ? "playing" : "paused");
+          }
         } else {
-          // Same song - just update position
+          // Same song - just update position, but respect local pause state
           setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
+          // Only update status if not locally paused
+          if (!isLocallyPaused) {
+            setStatus(roomState.isPlaying ? "playing" : "paused");
+          }
         }
       } else {
         // Server is idle
@@ -212,9 +234,15 @@ const WorkspacePage = () => {
           setCurrentSong(null);
           setStatus("paused");
           setSyncedPosition(0);
+          setIsLocallyPaused(false); // Reset local pause state when no song
         }
       }
-    });
+
+      return roomState;
+    } catch (error) {
+      console.warn("Failed to poll server state:", error);
+      throw error;
+    }
   };
 
   // Handle new song notification from server (when server was idle)
@@ -275,8 +303,8 @@ const WorkspacePage = () => {
 
       wsSync.on("room_joined", (message) => {
         console.log("🏠 Joined WebSocket room:", message);
-        // Start polling immediately after joining
-        startPollingServerState();
+        // Get initial state after joining room (no continuous polling)
+        pollServerStateOnce();
       });
       wsSync.on("error", (message) => {
         console.error("❌ WebSocket error:", message);
@@ -284,6 +312,12 @@ const WorkspacePage = () => {
       });
 
       console.log("✅ WebSocket sync initialized");
+
+      // Poll server state after initialization to sync with server
+      console.log("🔄 Initial server state poll after WebSocket setup...");
+      setTimeout(() => {
+        pollServerStateOnce();
+      }, 1000);
     } catch (error) {
       console.warn(
         "⚠️ WebSocket connection failed, falling back to Firebase:",
@@ -415,7 +449,7 @@ const WorkspacePage = () => {
 
         // Cleanup WebSocket and polling
         if (useWebSocketSync) {
-          wsSync.stopPolling();
+          wsSync.stopPolling(); // This will stop any remaining polling
           wsSync.leaveRoom();
           wsSync.disconnect();
         }
@@ -507,6 +541,10 @@ const WorkspacePage = () => {
       try {
         if (useWebSocketSync && wsConnected) {
           const setAsCurrent = !currentSong;
+          console.log(
+            `🎵 Adding song to server - setAsCurrent: ${setAsCurrent}`,
+          );
+
           const response = await wsSync.addSongToServer(newItem, setAsCurrent);
 
           if (response.success) {
@@ -517,8 +555,13 @@ const WorkspacePage = () => {
               // Server will notify about playback start
             } else {
               console.log("🎵 Song added to server queue");
-              // Will be updated via polling
             }
+
+            // Always poll server state after adding to get updated queue
+            console.log("🔄 Polling server state after adding song...");
+            setTimeout(() => {
+              pollServerStateOnce();
+            }, 500);
           }
         } else {
           // Fallback to local queue management
@@ -551,40 +594,28 @@ const WorkspacePage = () => {
     }
   };
 
-  const playNext = async () => {
-    if (queue.length > 0) {
-      setStatus("loading");
-      const nextSong = queue[0];
-      setCurrentSong(nextSong);
-      setQueue(queue.slice(1));
-
-      // Server automatically starts playing new song
-      if (workspaceId) {
-        try {
-          if (useWebSocketSync && wsConnected) {
-            // Use WebSocket for server-controlled song change
-            wsSync.syncSongChange(nextSong);
-            setStatus("playing");
-            setSyncedPosition(0);
-          } else {
-            // Fallback to Firebase sync
-            await synchronizedPlayback.changeSong(workspaceId, nextSong);
-            setStatus("playing");
-            setSyncedPosition(0);
-          }
-        } catch (error) {
-          console.warn("Failed to sync song change:", error);
-          setStatus("playing");
-        }
-      }
-    } else {
-      setCurrentSong(null);
-      setStatus("paused");
-    }
-  };
-
-  const removeFromQueue = (id: string) => {
+  const removeFromQueue = async (id: string) => {
+    // Remove locally first for immediate UI feedback
     setQueue(queue.filter((song) => song.id !== id));
+
+    // If using WebSocket sync, notify server about removal
+    if (useWebSocketSync && wsConnected) {
+      try {
+        wsSync.sendMessage({
+          type: "remove_from_queue",
+          songId: id,
+          clientTime: Date.now(),
+        });
+
+        // Poll server state after removal to resync queue
+        setTimeout(() => {
+          console.log("🔄 Polling server state after queue removal...");
+          pollServerStateOnce();
+        }, 500);
+      } catch (error) {
+        console.warn("Failed to notify server about queue removal:", error);
+      }
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -593,17 +624,16 @@ const WorkspacePage = () => {
     }
   };
 
-  const handlePlayerReady = useCallback(async () => {
-    console.log("Player ready - requesting initial server state");
-
-    // Request current server state when player is ready
-    if (useWebSocketSync && wsConnected && !isPolling) {
-      startPollingServerState();
+  const handlePlayerReady = useCallback(() => {
+    console.log("Player ready");
+    // Get initial server state when player is ready (no continuous polling)
+    if (useWebSocketSync && wsConnected) {
+      pollServerStateOnce();
     }
-  }, [useWebSocketSync, wsConnected, isPolling]);
+  }, [useWebSocketSync, wsConnected]);
 
   const handlePlayerEnd = useCallback(() => {
-    console.log("🎵 Song ended - notifying server and polling for next");
+    console.log("🎵 Song ended - stopping playback");
 
     // Notify server that song ended
     if (useWebSocketSync && wsConnected) {
@@ -613,33 +643,11 @@ const WorkspacePage = () => {
       });
     }
 
-    // Poll server immediately for next song
-    setTimeout(async () => {
-      try {
-        const roomState = await wsSync.requestRoomState();
-        console.log("📊 Server state after song end:", roomState);
-
-        if (roomState.currentSong) {
-          // Server has next song
-          setCurrentSong(roomState.currentSong);
-          setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
-        } else {
-          // Server is idle
-          setCurrentSong(null);
-          setStatus("paused");
-          setSyncedPosition(0);
-        }
-
-        setServerQueue(roomState.queue || []);
-      } catch (error) {
-        console.warn("Failed to get server state after song end:", error);
-        // Fallback - assume no more songs
-        setCurrentSong(null);
-        setStatus("paused");
-        setSyncedPosition(0);
-      }
-    }, 1000);
+    // Simply stop playback when song ends (no auto next song)
+    setCurrentSong(null);
+    setStatus("paused");
+    setSyncedPosition(0);
+    console.log("⏹️ Playback stopped - no auto next song");
   }, [useWebSocketSync, wsConnected]);
 
   const togglePlayPause = useCallback(async () => {
@@ -650,19 +658,17 @@ const WorkspacePage = () => {
     // Local play/pause control (doesn't affect server)
     if (status === "playing") {
       setStatus("paused");
-      console.log("⏸️ Paused locally - server continues");
+      setIsLocallyPaused(true);
+      console.log(
+        "⏸️ Paused locally - polling continues but won't override pause state",
+      );
     } else {
       // Resume and sync to server time
+      setIsLocallyPaused(false);
       try {
         if (useWebSocketSync && wsConnected) {
-          const roomState = await wsSync.requestRoomState();
-          if (roomState.currentSong && roomState.isPlaying) {
-            setSyncedPosition(roomState.position || 0);
-            setStatus("playing");
-            console.log("▶️ Resumed and synced to server position");
-          } else {
-            setStatus("playing");
-          }
+          await pollServerStateOnce();
+          console.log("▶️ Resumed and synced to server position");
         } else {
           setStatus("playing");
         }
@@ -730,6 +736,61 @@ const WorkspacePage = () => {
       <div className="w-full flex flex-col justify-center items-center px-4 py-8 bg-gray-900/40 min-h-screen">
         {/* Background */}
         <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-black" />
+
+        {/* Debug Panel - Temporary for server sync monitoring */}
+        <div
+          className="relative z-10 bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4"
+          style={{ width: "375px" }}
+        >
+          <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
+            🔧 DEBUG - Server Sync Monitor (On-Demand Only)
+          </div>
+          <div className="space-y-1 text-xs font-montserrat">
+            <div className="text-white">
+              <span className="text-gray-400">Poll Count:</span>{" "}
+              {debugPollCount}
+              <span className="text-gray-400 ml-3">Last Poll:</span>{" "}
+              {debugLastPollTime}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Song:</span>{" "}
+              {debugServerState?.currentSong
+                ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
+                : "💤 No song"}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Status:</span>{" "}
+              {debugServerState?.isPlaying ? "▶️ Playing" : "⏸️ Paused"} |
+              Position: {debugServerState?.position?.toFixed(1) || 0}s
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Queue:</span>{" "}
+              {debugServerState?.queue?.length || 0} songs
+              {debugServerState?.queue?.length > 0 && (
+                <div className="ml-4 mt-1 space-y-0.5">
+                  {debugServerState.queue
+                    .slice(0, 3)
+                    .map((song: any, index: number) => (
+                      <div key={index} className="text-gray-300 text-xs">
+                        {index + 1}. {song.title.substring(0, 35)}
+                        {song.title.length > 35 ? "..." : ""}
+                      </div>
+                    ))}
+                  {debugServerState.queue.length > 3 && (
+                    <div className="text-gray-400 text-xs">
+                      + {debugServerState.queue.length - 3} more...
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Local State:</span>{" "}
+              {isLocallyPaused ? "🔒 Locally Paused" : "🔄 Syncing"} | Status:{" "}
+              {status}
+            </div>
+          </div>
+        </div>
 
         {/* Main Container - Default State */}
         <div
@@ -882,47 +943,6 @@ const WorkspacePage = () => {
               >
                 Lên nhạc đi bạn yêu!
               </div>
-              <div className="flex items-center gap-2.5 opacity-30">
-                <div
-                  className="flex items-center justify-center"
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    padding: "10px",
-                    borderRadius: "50%",
-                    background: "#C60927",
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="14"
-                    viewBox="0 0 12 14"
-                    fill="none"
-                    style={{ width: "12px", height: "14px" }}
-                  >
-                    <path d="M10 7L2 2v10l8-5z" fill="white" />
-                  </svg>
-                </div>
-                <svg
-                  width="28"
-                  height="18"
-                  viewBox="0 0 28 18"
-                  fill="none"
-                  style={{ width: "28px", height: "18px" }}
-                >
-                  <g clipPath="url(#clip0_14098_28440)">
-                    <path
-                      d="M-0.000488281 16.0193L-0.000487054 1.97931C0.0013619 1.62343 0.0986145 1.27456 0.281137 0.969041C0.463659 0.663525 0.724772 0.412547 1.03727 0.242256C1.34977 0.0719643 1.70222 -0.0114082 2.05789 0.000825362C2.41357 0.0130588 2.75945 0.120451 3.05951 0.311811L12.9995 6.64181V1.97931C13.0013 1.62343 13.0986 1.27456 13.2811 0.969042C13.4636 0.663527 13.7247 0.412548 14.0372 0.242257C14.3497 0.0719655 14.7022 -0.0114071 15.0579 0.000826499C15.4135 0.01306 15.7594 0.120452 16.0595 0.311812L27.0832 7.33181C27.3641 7.51007 27.5954 7.75638 27.7556 8.04789C27.9159 8.3394 27.9999 8.66666 27.9999 8.99931C27.9999 9.33197 27.9159 9.65923 27.7556 9.95074C27.5954 10.2422 27.3641 10.4886 27.0832 10.6668L16.0595 17.6868C15.7595 17.8786 15.4135 17.9863 15.0577 17.9988C14.7019 18.0112 14.3492 17.9279 14.0366 17.7575C13.724 17.5872 13.4628 17.336 13.2804 17.0302C13.0979 16.7245 13.0009 16.3754 12.9995 16.0193V11.3568L3.05951 17.6868C2.75953 17.8786 2.41357 17.9863 2.05774 17.9988C1.70191 18.0112 1.34927 17.9279 1.03663 17.7575C0.723988 17.5872 0.462818 17.336 0.280388 17.0302C0.097957 16.7245 0.000955405 16.3754 -0.000488281 16.0193Z"
-                      fill="#C60927"
-                    />
-                  </g>
-                  <defs>
-                    <clipPath id="clip0_14098_28440">
-                      <rect width="28" height="18" fill="white" />
-                    </clipPath>
-                  </defs>
-                </svg>
-              </div>
             </div>
           </div>
 
@@ -1008,6 +1028,39 @@ const WorkspacePage = () => {
               </div>
             )}
           </div>
+
+          {/* Divider */}
+          <div
+            style={{
+              width: "343px",
+              height: "1px",
+              background: "rgba(167, 167, 167, 0.40)",
+            }}
+          />
+
+          {/* Version and Copyright */}
+          <div className="flex justify-between items-center w-full">
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Version {currentVersion}
+            </div>
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Copyright © 2025 Eventista
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1039,6 +1092,61 @@ const WorkspacePage = () => {
       {/* Main Container - Active State */}
       <div className="relative z-10 w-[375px] bg-black/80 rounded-xl p-4">
         <div className="w-full flex flex-col space-y-4">
+          {/* Debug Panel - Temporary for server sync monitoring */}
+          <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4 flex-shrink-0">
+            <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
+              🔧 DEBUG - Server Sync Monitor (On-Demand Only)
+            </div>
+            <div className="space-y-1 text-xs font-montserrat">
+              <div className="text-white">
+                <span className="text-gray-400">Version:</span> {currentVersion}
+                <span className="text-gray-400 ml-3">Poll Count:</span>{" "}
+                {debugPollCount}
+              </div>
+              <div className="text-white">
+                <span className="text-gray-400">Last Poll:</span>{" "}
+                {debugLastPollTime}
+              </div>
+              <div className="text-white">
+                <span className="text-gray-400">Server Song:</span>{" "}
+                {debugServerState?.currentSong
+                  ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
+                  : "💤 No song"}
+              </div>
+              <div className="text-white">
+                <span className="text-gray-400">Server Status:</span>{" "}
+                {debugServerState?.isPlaying ? "▶️ Playing" : "⏸️ Paused"} |
+                Position: {debugServerState?.position?.toFixed(1) || 0}s
+              </div>
+              <div className="text-white">
+                <span className="text-gray-400">Server Queue:</span>{" "}
+                {debugServerState?.queue?.length || 0} songs
+                {debugServerState?.queue?.length > 0 && (
+                  <div className="ml-4 mt-1 space-y-0.5">
+                    {debugServerState.queue
+                      .slice(0, 3)
+                      .map((song: any, index: number) => (
+                        <div key={index} className="text-gray-300 text-xs">
+                          {index + 1}. {song.title.substring(0, 35)}
+                          {song.title.length > 35 ? "..." : ""}
+                        </div>
+                      ))}
+                    {debugServerState.queue.length > 3 && (
+                      <div className="text-gray-400 text-xs">
+                        + {debugServerState.queue.length - 3} more...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="text-white">
+                <span className="text-gray-400">Local State:</span>{" "}
+                {isLocallyPaused ? "🔒 Locally Paused" : "🔄 Syncing"} | Status:{" "}
+                {status}
+              </div>
+            </div>
+          </div>
+
           {/* Header */}
           <div className="flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 w-full">
@@ -1153,18 +1261,6 @@ const WorkspacePage = () => {
                       </svg>
                     )}
                   </button>
-                  <button
-                    onClick={queue.length > 0 ? playNext : undefined}
-                    disabled={queue.length === 0}
-                    className="transition-opacity hover:opacity-75"
-                  >
-                    <svg width="28" height="18" viewBox="0 0 28 18" fill="none">
-                      <path
-                        d="M-0.000366211 16.0193L-0.000364984 1.97931C0.00148398 1.62343 0.0987365 1.27456 0.281259 0.969041C0.463781 0.663525 0.724894 0.412547 1.03739 0.242256C1.34989 0.0719643 1.70234 -0.0114082 2.05801 0.000825362C2.41369 0.0130588 2.75957 0.120451 3.05963 0.311811L12.9997 6.64181V1.97931C13.0015 1.62343 13.0988 1.27456 13.2813 0.969042C13.4638 0.663527 13.7249 0.412548 14.0374 0.242257C14.3499 0.0719655 14.7024 -0.0114071 15.0581 0.000826499C15.4137 0.01306 15.7596 0.120452 16.0597 0.311812L27.0834 7.33181C27.3643 7.51007 27.5956 7.75638 27.7558 8.04789C27.9161 8.3394 28.0001 8.66666 28.0001 8.99931C28.0001 9.33197 27.9161 9.65923 27.7558 9.95074C27.5956 10.2422 27.3643 10.4886 27.0834 10.6668L16.0597 17.6868C15.7597 17.8786 15.4137 17.9863 15.0579 17.9988C14.7021 18.0112 14.3494 17.9279 14.0368 17.7575C13.7242 17.5872 13.463 17.336 13.2806 17.0302C13.0981 16.7245 13.0011 16.3754 12.9997 16.0193V11.3568L3.05963 17.6868C2.75965 17.8786 2.41369 17.9863 2.05786 17.9988C1.70203 18.0112 1.34939 17.9279 1.03675 17.7575C0.72411 17.5872 0.46294 17.336 0.28051 17.0302C0.0980791 16.7245 0.00107748 16.3754 -0.000366211 16.0193Z"
-                        fill="#C60927"
-                      />
-                    </svg>
-                  </button>
                 </div>
               </div>
             </div>
@@ -1258,6 +1354,33 @@ const WorkspacePage = () => {
               </div>
             </>
           )}
+
+          {/* Divider */}
+          <div className="h-px bg-gray-600/40 flex-shrink-0" />
+
+          {/* Version and Copyright */}
+          <div className="flex justify-between items-center w-full flex-shrink-0">
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Version {currentVersion}
+            </div>
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Copyright © 2025 Eventista
+            </div>
+          </div>
         </div>
       </div>
     </div>
