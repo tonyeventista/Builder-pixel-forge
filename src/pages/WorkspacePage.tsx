@@ -52,6 +52,7 @@ const WorkspacePage = () => {
     null,
   );
   const [isFading, setIsFading] = useState(false);
+  const [isLocallyPaused, setIsLocallyPaused] = useState(false);
 
   // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
