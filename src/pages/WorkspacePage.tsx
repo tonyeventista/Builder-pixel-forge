@@ -310,6 +310,12 @@ const WorkspacePage = () => {
       });
 
       console.log("✅ WebSocket sync initialized");
+
+      // Poll server state after initialization to sync with server
+      console.log("🔄 Initial server state poll after WebSocket setup...");
+      setTimeout(() => {
+        pollServerStateOnce();
+      }, 1000);
     } catch (error) {
       console.warn(
         "⚠️ WebSocket connection failed, falling back to Firebase:",
@@ -767,7 +773,7 @@ const WorkspacePage = () => {
             <div className="text-white">
               <span className="text-gray-400">Server Song:</span>{" "}
               {debugServerState?.currentSong
-                ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
+                ? `���� ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
                 : "💤 No song"}
             </div>
             <div className="text-white">
