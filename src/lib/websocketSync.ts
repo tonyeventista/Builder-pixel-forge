@@ -30,7 +30,16 @@ export class WebSocketMusicSync {
   private isConnecting = false;
   private serverTimeOffset = 0;
 
-  constructor(url: string = "ws://localhost:8081") {
+  constructor(url: string = "") {
+    // Auto-detect WebSocket URL based on environment
+    if (!url) {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.hostname;
+      const port = window.location.hostname === "localhost" ? ":8081" : ":8081";
+      this.url = `${protocol}//${host}${port}`;
+    } else {
+      this.url = url;
+    }
     this.url = url;
     this.setupEventHandlers();
   }
