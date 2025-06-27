@@ -757,6 +757,61 @@ const WorkspacePage = () => {
         {/* Background */}
         <div className="fixed inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-black" />
 
+        {/* Debug Panel - Temporary for server sync monitoring */}
+        <div
+          className="relative z-10 bg-red-900/20 border border-red-500/30 rounded-lg p-3 mb-4"
+          style={{ width: "375px" }}
+        >
+          <div className="text-red-400 font-bold text-xs mb-2 font-montserrat">
+            🔧 DEBUG - Server Sync Monitor
+          </div>
+          <div className="space-y-1 text-xs font-montserrat">
+            <div className="text-white">
+              <span className="text-gray-400">Poll Count:</span>{" "}
+              {debugPollCount}
+              <span className="text-gray-400 ml-3">Last Poll:</span>{" "}
+              {debugLastPollTime}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Song:</span>{" "}
+              {debugServerState?.currentSong
+                ? `🎵 ${debugServerState.currentSong.title.substring(0, 40)}${debugServerState.currentSong.title.length > 40 ? "..." : ""}`
+                : "💤 No song"}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Status:</span>{" "}
+              {debugServerState?.isPlaying ? "▶️ Playing" : "⏸️ Paused"} |
+              Position: {debugServerState?.position?.toFixed(1) || 0}s
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Server Queue:</span>{" "}
+              {debugServerState?.queue?.length || 0} songs
+              {debugServerState?.queue?.length > 0 && (
+                <div className="ml-4 mt-1 space-y-0.5">
+                  {debugServerState.queue
+                    .slice(0, 3)
+                    .map((song: any, index: number) => (
+                      <div key={index} className="text-gray-300 text-xs">
+                        {index + 1}. {song.title.substring(0, 35)}
+                        {song.title.length > 35 ? "..." : ""}
+                      </div>
+                    ))}
+                  {debugServerState.queue.length > 3 && (
+                    <div className="text-gray-400 text-xs">
+                      + {debugServerState.queue.length - 3} more...
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="text-white">
+              <span className="text-gray-400">Local State:</span>{" "}
+              {isLocallyPaused ? "🔒 Locally Paused" : "🔄 Syncing"} | Status:{" "}
+              {status}
+            </div>
+          </div>
+        </div>
+
         {/* Main Container - Default State */}
         <div
           className="relative z-10 rounded-xl"
