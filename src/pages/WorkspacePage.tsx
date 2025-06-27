@@ -41,13 +41,17 @@ const WorkspacePage = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasSyncedFromFirebase, setHasSyncedFromFirebase] = useState(false);
 
-  // Server-authoritative playback state
+  // Polling-based sync state
   const [syncedPosition, setSyncedPosition] = useState(0);
   const [lastSyncTime, setLastSyncTime] = useState(0);
-  const [useWebSocketSync, setUseWebSocketSync] = useState(true); // Enable WebSocket for ultra-fast sync
+  const [useWebSocketSync, setUseWebSocketSync] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [serverPlaybackState, setServerPlaybackState] = useState<any>(null);
-  const [isLocallyPaused, setIsLocallyPaused] = useState(false);
+  const [serverQueue, setServerQueue] = useState<Song[]>([]);
+  const [isPolling, setIsPolling] = useState(false);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
+    null,
+  );
+  const [isFading, setIsFading] = useState(false);
 
   // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
@@ -174,6 +178,81 @@ const WorkspacePage = () => {
     return title;
   };
 
+  // Start polling server state
+  const startPollingServerState = () => {
+    if (isPolling) return;
+
+    setIsPolling(true);
+    wsSync.startPolling((roomState) => {
+      console.log("📊 Received server state:", roomState);
+
+      // Update queue from server
+      setServerQueue(roomState.queue || []);
+
+      if (roomState.currentSong) {
+        // Server has a song playing
+        if (!currentSong || currentSong.id !== roomState.currentSong.id) {
+          // Different song - need to sync
+          console.log(
+            "🔄 Syncing to server song:",
+            roomState.currentSong.title,
+          );
+          setCurrentSong(roomState.currentSong);
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        } else {
+          // Same song - just update position
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        }
+      } else {
+        // Server is idle
+        if (currentSong) {
+          console.log("💤 Server is idle - stopping current song");
+          setCurrentSong(null);
+          setStatus("paused");
+          setSyncedPosition(0);
+        }
+      }
+    });
+  };
+
+  // Handle new song notification from server (when server was idle)
+  const handleNewSongFromServer = async (
+    song: Song,
+    startTime: number,
+    wasIdle: boolean,
+  ) => {
+    console.log("🎵 Handling new song from server:", song.title);
+
+    if (currentSong && currentSong.id !== song.id) {
+      // We have a different song playing - need to fade and switch
+      console.log("🎭 Different song playing - fading to new song");
+      await fadeToNewSong(song, startTime);
+    } else {
+      // No song or same song - just update
+      setCurrentSong(song);
+      const position = wsSync.calculateServerPosition(startTime, Date.now());
+      setSyncedPosition(position);
+      setStatus("playing");
+    }
+  };
+
+  // Fade current song and switch to new song
+  const fadeToNewSong = async (newSong: Song, startTime: number) => {
+    setIsFading(true);
+
+    // TODO: Implement audio fading here
+    // For now, just switch immediately
+    setTimeout(() => {
+      setCurrentSong(newSong);
+      const position = wsSync.calculateServerPosition(startTime, Date.now());
+      setSyncedPosition(position);
+      setStatus("playing");
+      setIsFading(false);
+    }, 500);
+  };
+
   // WebSocket initialization function
   const initializeWebSocketSync = async () => {
     try {
@@ -184,85 +263,21 @@ const WorkspacePage = () => {
       // Join room
       await wsSync.joinRoom(workspaceId);
 
-      // Setup event handlers for server-authoritative model
-      wsSync.on("server_play_sync", (message) => {
-        console.log("📡 Server play sync:", message);
-        const newServerState = {
-          isPlaying: true,
-          position: message.position,
-          startTime: message.startTime,
-          currentSong: null,
-          lastUpdated: message.serverTime,
-        };
-        setServerPlaybackState(newServerState);
-        const currentPos = wsSync.calculateCurrentPosition(newServerState);
-        setSyncedPosition(currentPos);
-        setStatus("playing");
-        setIsLocallyPaused(false); // Reset local pause when server starts playing
-      });
-
-      wsSync.on("server_state_sync", (message) => {
-        console.log("📡 Server state sync:", message);
-        setServerPlaybackState(message.playbackState);
-        const currentPos = wsSync.calculateCurrentPosition(
-          message.playbackState,
+      // Setup event handlers for new song notifications only
+      wsSync.on("new_song_notification", (message) => {
+        console.log("🎵 New song notification from server:", message);
+        handleNewSongFromServer(
+          message.song,
+          message.startTime,
+          message.wasIdle,
         );
-        setSyncedPosition(currentPos);
-        // Only update status if not locally paused
-        if (!wsSync.isLocallyPaused()) {
-          setStatus(message.isServerPlaying ? "playing" : "paused");
-        }
-      });
-
-      wsSync.on("seek_sync", (message) => {
-        console.log("📡 WebSocket seek sync:", message);
-        setSyncedPosition(message.position);
-        if (!wsSync.isLocallyPaused()) {
-          setStatus(message.isPlaying ? "playing" : "paused");
-        }
-      });
-
-      wsSync.on("song_change_sync", (message) => {
-        console.log("📡 WebSocket song change:", message);
-        if (message.song) {
-          setCurrentSong(message.song);
-          setSyncedPosition(0);
-          setStatus("playing");
-          setIsLocallyPaused(false); // Reset local pause on song change
-          // Update server state
-          setServerPlaybackState({
-            isPlaying: true,
-            position: 0,
-            startTime: message.startTime,
-            currentSong: message.song,
-            lastUpdated: message.serverTime,
-          });
-        }
       });
 
       wsSync.on("room_joined", (message) => {
         console.log("🏠 Joined WebSocket room:", message);
-        if (message.playbackState && message.playbackState.currentSong) {
-          // Sync to existing playback state
-          setCurrentSong(message.playbackState.currentSong);
-          setServerPlaybackState(message.playbackState);
-          const currentPos = wsSync.calculateCurrentPosition(
-            message.playbackState,
-          );
-          setSyncedPosition(currentPos);
-          setStatus(message.playbackState.isPlaying ? "playing" : "paused");
-        }
+        // Start polling immediately after joining
+        startPollingServerState();
       });
-
-      wsSync.on("playback_ended_sync", (message) => {
-        console.log("🏁 Server playback ended - clearing state");
-        setCurrentSong(null);
-        setStatus("paused");
-        setIsLocallyPaused(false);
-        setSyncedPosition(0);
-        setServerPlaybackState(null);
-      });
-
       wsSync.on("error", (message) => {
         console.error("❌ WebSocket error:", message);
         setWsConnected(false);
@@ -398,11 +413,13 @@ const WorkspacePage = () => {
         synchronizedPlayback.unsubscribeFromPlayback(workspaceId);
         synchronizedPlayback.stopSyncCheck();
 
-        // Cleanup WebSocket
+        // Cleanup WebSocket and polling
         if (useWebSocketSync) {
+          wsSync.stopPolling();
           wsSync.leaveRoom();
           wsSync.disconnect();
         }
+        setIsPolling(false);
       } catch (error) {
         // Silent cleanup
       }
@@ -486,32 +503,42 @@ const WorkspacePage = () => {
         videoId,
       };
 
-      if (!currentSong) {
-        console.log("🎵 Setting as current song and starting server playback");
-        setStatus("loading");
-        setCurrentSong(newItem);
+      // Add song to server
+      try {
+        if (useWebSocketSync && wsConnected) {
+          const setAsCurrent = !currentSong;
+          const response = await wsSync.addSongToServer(newItem, setAsCurrent);
 
-        // Auto-start playback on server when adding first song
-        try {
-          if (useWebSocketSync && wsConnected) {
-            // Use WebSocket for server-controlled playback
-            wsSync.serverPlay(0, newItem.id);
-            setStatus("playing");
-            setSyncedPosition(0);
-            setIsLocallyPaused(false);
-          } else {
-            // Fallback to Firebase sync
-            await synchronizedPlayback.startPlayback(workspaceId, newItem, 0);
-            setStatus("playing");
-            setSyncedPosition(0);
+          if (response.success) {
+            if (response.setAsCurrent) {
+              console.log("🎵 Song set as current on server");
+              setStatus("loading");
+              setCurrentSong(newItem);
+              // Server will notify about playback start
+            } else {
+              console.log("🎵 Song added to server queue");
+              // Will be updated via polling
+            }
           }
-        } catch (error) {
-          console.warn("Failed to start server playback:", error);
-          setStatus("playing");
+        } else {
+          // Fallback to local queue management
+          if (!currentSong) {
+            setCurrentSong(newItem);
+            setStatus("playing");
+            setSyncedPosition(0);
+          } else {
+            setQueue([...queue, newItem]);
+          }
         }
-      } else {
-        console.log("🎵 Adding to queue - will play after current song");
-        setQueue([...queue, newItem]);
+      } catch (error) {
+        console.warn("Failed to add song to server:", error);
+        // Fallback to local management
+        if (!currentSong) {
+          setCurrentSong(newItem);
+          setStatus("playing");
+        } else {
+          setQueue([...queue, newItem]);
+        }
       }
 
       setInputUrl("");
@@ -568,62 +595,53 @@ const WorkspacePage = () => {
   };
 
   const handlePlayerReady = useCallback(async () => {
-    console.log("Player ready - syncing to server state");
+    console.log("Player ready - requesting initial server state");
 
     // Request current server state when player is ready
-    if (useWebSocketSync && wsConnected) {
-      wsSync.requestSync();
-    } else if (workspaceId) {
-      // Fallback to Firebase sync
-      const existingPlayback =
-        await synchronizedPlayback.checkExistingPlayback(workspaceId);
-
-      if (existingPlayback) {
-        const currentPos =
-          synchronizedPlayback.calculateCurrentPosition(existingPlayback);
-        setSyncedPosition(currentPos);
-
-        if (existingPlayback.type === "play") {
-          setStatus("playing");
-          console.log(
-            "Joining existing playback - auto-playing at position:",
-            currentPos,
-          );
-        } else {
-          setStatus("paused");
-        }
-      }
+    if (useWebSocketSync && wsConnected && !isPolling) {
+      startPollingServerState();
     }
-  }, [workspaceId, useWebSocketSync, wsConnected]);
+  }, [useWebSocketSync, wsConnected, isPolling]);
 
   const handlePlayerEnd = useCallback(() => {
-    console.log("🎵 Song ended, queue length:", queue.length);
+    console.log("🎵 Song ended - notifying server and polling for next");
 
-    setTimeout(() => {
-      if (queue.length > 0) {
-        // Play next song from queue automatically on server
-        console.log("🎵 Playing next song from queue");
-        playNext();
-      } else {
-        // No more songs - clear current song and set to idle state
-        console.log("🎵 No more songs in queue - setting to idle state");
+    // Notify server that song ended
+    if (useWebSocketSync && wsConnected) {
+      wsSync.sendMessage({
+        type: "playback_ended",
+        clientTime: Date.now(),
+      });
+    }
+
+    // Poll server immediately for next song
+    setTimeout(async () => {
+      try {
+        const roomState = await wsSync.requestRoomState();
+        console.log("📊 Server state after song end:", roomState);
+
+        if (roomState.currentSong) {
+          // Server has next song
+          setCurrentSong(roomState.currentSong);
+          setSyncedPosition(roomState.position || 0);
+          setStatus(roomState.isPlaying ? "playing" : "paused");
+        } else {
+          // Server is idle
+          setCurrentSong(null);
+          setStatus("paused");
+          setSyncedPosition(0);
+        }
+
+        setServerQueue(roomState.queue || []);
+      } catch (error) {
+        console.warn("Failed to get server state after song end:", error);
+        // Fallback - assume no more songs
         setCurrentSong(null);
         setStatus("paused");
-        setIsLocallyPaused(false);
         setSyncedPosition(0);
-
-        // Clear server state as well
-        if (workspaceId && useWebSocketSync && wsConnected) {
-          // Notify server that playback has ended
-          wsSync.sendMessage({
-            type: "playback_ended",
-            workspaceId: workspaceId,
-            clientTime: Date.now(),
-          });
-        }
       }
-    }, 2000);
-  }, [queue, workspaceId, useWebSocketSync, wsConnected]);
+    }, 1000);
+  }, [useWebSocketSync, wsConnected]);
 
   const togglePlayPause = useCallback(async () => {
     if (!currentSong) return;
@@ -1015,16 +1033,11 @@ const WorkspacePage = () => {
             videoId={currentSong.videoId || ""}
             isPlaying={status === "playing"}
             startPosition={syncedPosition}
-            isLocallyPaused={isLocallyPaused}
-            serverPlaying={serverPlaybackState?.isPlaying || false}
             onReady={handlePlayerReady}
             onEnd={handlePlayerEnd}
             onTimeUpdate={(currentTime) => {
-              // Only update position if not locally paused
-              if (!isLocallyPaused) {
-                setSyncedPosition(currentTime);
-                setLastSyncTime(Date.now());
-              }
+              setSyncedPosition(currentTime);
+              setLastSyncTime(Date.now());
             }}
           />
         </div>
