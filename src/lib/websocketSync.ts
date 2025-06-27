@@ -114,9 +114,18 @@ export class WebSocketMusicSync {
         this.ws.onerror = (error) => {
           console.error("❌ WebSocket error - trying to connect to:", this.url);
           console.error("Error details:", error);
+          console.error("🔧 Connection troubleshooting:", {
+            url: this.url,
+            isDev: import.meta.env.DEV,
+            currentLocation: window.location.href,
+            expectedDevUrl: `ws://${window.location.host}/ws`,
+            timestamp: new Date().toISOString(),
+          });
           this.isConnecting = false;
           reject(
-            new Error(`Failed to connect to WebSocket server at ${this.url}`),
+            new Error(
+              `Failed to connect to WebSocket server at ${this.url}. Check if the WebSocket server is running on the expected endpoint.`,
+            ),
           );
         };
       } catch (error) {
