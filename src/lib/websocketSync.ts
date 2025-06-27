@@ -43,15 +43,28 @@ export class WebSocketMusicSync {
         const host = window.location.host; // includes port
         this.url = `${protocol}//${host}/ws`;
         console.log("🔗 WebSocket URL (dev proxy):", this.url);
+        console.log("🔧 Environment details:", {
+          isDev: import.meta.env.DEV,
+          protocol: window.location.protocol,
+          host: window.location.host,
+          href: window.location.href,
+        });
       } else {
         // In production, you'll need to configure this for your deployment
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const host = window.location.host;
         this.url = `${protocol}//${host}/ws`;
         console.log("🔗 WebSocket URL (production):", this.url);
+        console.log("🔧 Environment details:", {
+          isDev: import.meta.env.DEV,
+          protocol: window.location.protocol,
+          host: window.location.host,
+          href: window.location.href,
+        });
       }
     } else {
       this.url = url;
+      console.log("🔗 WebSocket URL (custom):", this.url);
     }
     this.setupEventHandlers();
   }
