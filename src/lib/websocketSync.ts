@@ -78,9 +78,12 @@ export class WebSocketMusicSync {
         };
 
         this.ws.onerror = (error) => {
-          console.error("❌ WebSocket error:", error);
+          console.error("❌ WebSocket error - trying to connect to:", this.url);
+          console.error("Error details:", error);
           this.isConnecting = false;
-          reject(error);
+          reject(
+            new Error(`Failed to connect to WebSocket server at ${this.url}`),
+          );
         };
       } catch (error) {
         this.isConnecting = false;
