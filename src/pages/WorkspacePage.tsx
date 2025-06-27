@@ -184,13 +184,11 @@ const WorkspacePage = () => {
     return title;
   };
 
-  // Start polling server state
-  const startPollingServerState = () => {
-    if (isPolling) return;
-
-    setIsPolling(true);
-    wsSync.startPolling((roomState) => {
-      console.log("📊 Received server state:", roomState);
+  // Poll server state on-demand (not continuously)
+  const pollServerStateOnce = async () => {
+    try {
+      console.log("📊 Polling server state once...");
+      const roomState = await wsSync.requestRoomState();
 
       // Debug: Capture polling information
       const now = new Date();
@@ -236,7 +234,12 @@ const WorkspacePage = () => {
           setIsLocallyPaused(false); // Reset local pause state when no song
         }
       }
-    });
+
+      return roomState;
+    } catch (error) {
+      console.warn("Failed to poll server state:", error);
+      throw error;
+    }
   };
 
   // Handle new song notification from server (when server was idle)
