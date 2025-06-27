@@ -741,8 +741,8 @@ const WorkspacePage = () => {
                 lineHeight: "16px",
               }}
             >
-              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nhạc cùng
-              nhé babe
+              Share Room-ID hoặc copy đường dẫn để mời đồng nghiệp lên nh��c
+              cùng nhé babe
             </div>
           </div>
 
@@ -973,20 +973,6 @@ const WorkspacePage = () => {
               <div className="text-gray-400 font-bold text-xs uppercase tracking-wide font-montserrat">
                 {workspaceId}
               </div>
-              {currentSong && status === "playing" && (
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                  <span className="text-green-400 text-xs font-montserrat">
-                    {wsConnected ? "WS-SYNC" : "SYNC"}
-                  </span>
-                  {wsConnected && (
-                    <div
-                      className="w-1 h-1 bg-blue-400 rounded-full animate-pulse ml-1"
-                      title="WebSocket connected"
-                    />
-                  )}
-                </div>
-              )}
               <button
                 onClick={copyWorkspaceUrl}
                 className="hover:opacity-75 transition-opacity"
