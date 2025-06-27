@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run dev:server\" \"vite\"",
+    "dev:client": "vite",
+    "dev:server": "cd server && npm start",
     "build": "vite build",
     "test": "vitest --run",
     "format.fix": "prettier --write .",
