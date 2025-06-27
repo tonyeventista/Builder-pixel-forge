@@ -203,11 +203,17 @@ const WorkspacePage = () => {
           );
           setCurrentSong(roomState.currentSong);
           setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
+          // Only update status if not locally paused
+          if (!isLocallyPaused) {
+            setStatus(roomState.isPlaying ? "playing" : "paused");
+          }
         } else {
-          // Same song - just update position
+          // Same song - just update position, but respect local pause state
           setSyncedPosition(roomState.position || 0);
-          setStatus(roomState.isPlaying ? "playing" : "paused");
+          // Only update status if not locally paused
+          if (!isLocallyPaused) {
+            setStatus(roomState.isPlaying ? "playing" : "paused");
+          }
         }
       } else {
         // Server is idle
@@ -216,6 +222,7 @@ const WorkspacePage = () => {
           setCurrentSong(null);
           setStatus("paused");
           setSyncedPosition(0);
+          setIsLocallyPaused(false); // Reset local pause state when no song
         }
       }
     });
