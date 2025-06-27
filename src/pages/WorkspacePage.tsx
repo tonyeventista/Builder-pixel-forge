@@ -1294,6 +1294,33 @@ const WorkspacePage = () => {
               </div>
             </>
           )}
+
+          {/* Divider */}
+          <div className="h-px bg-gray-600/40 flex-shrink-0" />
+
+          {/* Version and Copyright */}
+          <div className="flex justify-between items-center w-full flex-shrink-0">
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Version 2.0.0
+            </div>
+            <div
+              className="font-montserrat font-bold text-center"
+              style={{
+                color: "#FFF",
+                fontSize: "10px",
+                lineHeight: "12px",
+              }}
+            >
+              Copyright © 2025 Eventista
+            </div>
+          </div>
         </div>
       </div>
     </div>
