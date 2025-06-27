@@ -203,7 +203,7 @@ const WorkspacePage = () => {
 
       // Sync local queue with server queue for UI display - maintain server order
       setQueue(serverQueue);
-      console.log(`📋 Synced queue from server: ${serverQueue.length} songs`);
+      console.log(`�� Synced queue from server: ${serverQueue.length} songs`);
 
       if (roomState.currentSong) {
         // Server has a song playing
@@ -626,8 +626,28 @@ const WorkspacePage = () => {
     }
   };
 
-  const removeFromQueue = (id: string) => {
+  const removeFromQueue = async (id: string) => {
+    // Remove locally first for immediate UI feedback
     setQueue(queue.filter((song) => song.id !== id));
+
+    // If using WebSocket sync, notify server about removal
+    if (useWebSocketSync && wsConnected) {
+      try {
+        wsSync.sendMessage({
+          type: "remove_from_queue",
+          songId: id,
+          clientTime: Date.now(),
+        });
+
+        // Poll server state after removal to resync queue
+        setTimeout(() => {
+          console.log("🔄 Polling server state after queue removal...");
+          pollServerStateOnce();
+        }, 500);
+      } catch (error) {
+        console.warn("Failed to notify server about queue removal:", error);
+      }
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
