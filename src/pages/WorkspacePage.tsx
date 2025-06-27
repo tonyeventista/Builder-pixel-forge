@@ -939,28 +939,30 @@ const WorkspacePage = () => {
         <div className="w-full flex flex-col space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate("/")}
-                className="text-white hover:text-gray-300 transition-colors p-1"
-                title="Quay về trang chọn workspace"
+            <div className="flex items-center gap-2 w-full">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="text-white"
               >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
-                </svg>
-              </button>
+                <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
+              </svg>
               <img
                 src="https://cdn.builder.io/api/v1/image/assets%2Fd06e69fb86f44047b7162ed72bfce147%2Fcab92a1a55f944d6ab31d70365f33cf1?format=webp&width=800"
                 alt="ZONE Logo"
                 className="w-[100px] h-[29px]"
               />
+              {currentSong && status === "playing" && (
+                <div className="flex items-center gap-1 w-full justify-end">
+                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  <span className="text-green-400 text-xs font-montserrat">
+                    SYNC
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="w-3 h-3 bg-green-400 rounded-full" />
           </div>
 
           <div className="h-px bg-gray-600/40 flex-shrink-0" />
