@@ -392,7 +392,7 @@ class MusicSyncServer {
 }
 
 // Start server
-const server = new MusicSyncServer(8080);
+const server = new MusicSyncServer(process.env.PORT || 8081);
 
 // Graceful shutdown
 process.on("SIGINT", () => {

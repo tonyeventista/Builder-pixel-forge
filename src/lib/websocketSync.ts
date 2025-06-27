@@ -30,7 +30,7 @@ export class WebSocketMusicSync {
   private isConnecting = false;
   private serverTimeOffset = 0;
 
-  constructor(url: string = "ws://localhost:8080") {
+  constructor(url: string = "ws://localhost:8081") {
     this.url = url;
     this.setupEventHandlers();
   }
