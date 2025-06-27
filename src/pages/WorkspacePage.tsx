@@ -594,38 +594,6 @@ const WorkspacePage = () => {
     }
   };
 
-  const playNext = async () => {
-    if (queue.length > 0) {
-      setStatus("loading");
-      const nextSong = queue[0];
-      setCurrentSong(nextSong);
-      setQueue(queue.slice(1));
-
-      // Server automatically starts playing new song
-      if (workspaceId) {
-        try {
-          if (useWebSocketSync && wsConnected) {
-            // Use WebSocket for server-controlled song change
-            wsSync.syncSongChange(nextSong);
-            setStatus("playing");
-            setSyncedPosition(0);
-          } else {
-            // Fallback to Firebase sync
-            await synchronizedPlayback.changeSong(workspaceId, nextSong);
-            setStatus("playing");
-            setSyncedPosition(0);
-          }
-        } catch (error) {
-          console.warn("Failed to sync song change:", error);
-          setStatus("playing");
-        }
-      }
-    } else {
-      setCurrentSong(null);
-      setStatus("paused");
-    }
-  };
-
   const removeFromQueue = async (id: string) => {
     // Remove locally first for immediate UI feedback
     setQueue(queue.filter((song) => song.id !== id));
