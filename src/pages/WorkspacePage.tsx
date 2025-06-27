@@ -999,7 +999,7 @@ const WorkspacePage = () => {
               </button>
             </div>
             <div className="text-white text-xs font-montserrat">
-              Share Room-ID để cùng nghe nhạc đồng b��� theo thời gian thực. Tất
+              Share Room-ID để cùng nghe nhạc đồng bộ theo thời gian thực. Tất
               cả mọi người sẽ nghe cùng lúc!
             </div>
           </div>
@@ -1086,7 +1086,7 @@ const WorkspacePage = () => {
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Nhập link bài hát, chỉ hỗ trợ Youtube"
+                placeholder="Nhập link bài hát để thêm vào playlist nhóm"
                 className="flex-1 bg-transparent text-gray-400 text-xs font-montserrat outline-none"
               />
             </div>
