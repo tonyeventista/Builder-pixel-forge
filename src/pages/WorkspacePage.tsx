@@ -254,6 +254,15 @@ const WorkspacePage = () => {
         }
       });
 
+      wsSync.on("playback_ended_sync", (message) => {
+        console.log("🏁 Server playback ended - clearing state");
+        setCurrentSong(null);
+        setStatus("paused");
+        setIsLocallyPaused(false);
+        setSyncedPosition(0);
+        setServerPlaybackState(null);
+      });
+
       wsSync.on("error", (message) => {
         console.error("❌ WebSocket error:", message);
         setWsConnected(false);
