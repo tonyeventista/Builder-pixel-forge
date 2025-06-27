@@ -625,7 +625,6 @@ const WorkspacePage = () => {
       pollServerStateOnce();
     }
   }, [useWebSocketSync, wsConnected]);
-  }, [useWebSocketSync, wsConnected, isPolling]);
 
   const handlePlayerEnd = useCallback(() => {
     console.log("🎵 Song ended - notifying server and polling for next");
@@ -1059,7 +1058,7 @@ const WorkspacePage = () => {
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Nhập link bài hát để thêm vào playlist nhóm"
+                placeholder="Nhập link bài hát để thêm vào playlist nh��m"
                 className="flex-1 bg-transparent text-gray-400 text-xs font-montserrat outline-none border-none"
                 style={{
                   color: "#A7A7A7",
