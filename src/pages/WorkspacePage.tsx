@@ -192,6 +192,12 @@ const WorkspacePage = () => {
     wsSync.startPolling((roomState) => {
       console.log("📊 Received server state:", roomState);
 
+      // Debug: Capture polling information
+      const now = new Date();
+      setDebugServerState(roomState);
+      setDebugLastPollTime(now.toLocaleTimeString("vi-VN"));
+      setDebugPollCount((prev) => prev + 1);
+
       // Update queue from server
       setServerQueue(roomState.queue || []);
 
