@@ -54,6 +54,11 @@ const WorkspacePage = () => {
   const [isFading, setIsFading] = useState(false);
   const [isLocallyPaused, setIsLocallyPaused] = useState(false);
 
+  // Debug state for server sync monitoring
+  const [debugServerState, setDebugServerState] = useState<any>(null);
+  const [debugLastPollTime, setDebugLastPollTime] = useState<string>("");
+  const [debugPollCount, setDebugPollCount] = useState(0);
+
   // Helper function to fetch YouTube video title with timeout and retry
   const fetchYouTubeTitle = async (
     videoId: string,
